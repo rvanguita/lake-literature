@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Ferramentas locais do Claude Code (não é conteúdo do projeto)
+.claude/
+
+# Dados binários grandes / regeneráveis (não versionar)
+data/articles/
+data/ieee/*.zip
+data/sciencedirect.zip
+data/enrichment_cache.json
+
+# OS
+.DS_Store
