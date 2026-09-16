@@ -425,6 +425,16 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
     """
     t = _tokens()
     has_title = bool(fig.layout.title and fig.layout.title.text)
+    if not has_title:
+        # `charts.py`'s builders always pass `title=title` to `update_layout`,
+        # even when the caller didn't supply one -- that explicit `None`
+        # still serializes `layout.title` as `{}` (Plotly's layout objects
+        # have schema defaults for every sub-field) rather than omitting the
+        # key. Streamlit's "streamlit" chart theme reads `title.text`
+        # whenever the key is present and renders the resulting `undefined`
+        # as literal text, so drop the key entirely when there's no real
+        # title to show.
+        fig.layout.pop("title", None)
     top_margin = 105 if has_title else 55
     legend_y = 0.86 if has_title else 1.06
 
