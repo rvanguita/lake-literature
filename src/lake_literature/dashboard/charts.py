@@ -160,6 +160,52 @@ def topn_hbar(
     return fig
 
 
+def source_topn_hbar(
+    df: pd.DataFrame,
+    label_col: str,
+    *,
+    title: str | None = None,
+    x_title: str | None = None,
+) -> go.Figure:
+    """Stacked IEEE/Elsevier horizontal bars, ranked by `total` (highest on top).
+
+    `df` must have the shape produced by `analytics.source_counts_by`:
+    columns `[label_col, "ieee", "elsevier", "total"]`, already head-limited
+    by the caller. The horizontal counterpart to `source_bars`' vertical
+    stacked bars -- for a top-N ranking, coloring a single bar by an entity's
+    *modal* source (`topn_hbar`'s `color_by`) hides a source with fewer, but
+    real, contributions whenever the corpus is source-skewed enough that
+    "top overall" and "top in the minority source" barely overlap (every bar
+    then renders in the majority source's color, looking like the minority
+    source doesn't exist at all).
+    """
+    ordered = df.sort_values("total", ascending=True)
+    fig = go.Figure()
+    fig.add_bar(
+        y=ordered[label_col],
+        x=ordered["ieee"],
+        name=SOURCE_LABELS["ieee"],
+        orientation="h",
+        marker_color=SOURCE_COLORS["ieee"],
+    )
+    fig.add_bar(
+        y=ordered[label_col],
+        x=ordered["elsevier"],
+        name=SOURCE_LABELS["elsevier"],
+        orientation="h",
+        marker_color=SOURCE_COLORS["elsevier"],
+    )
+    fig.update_layout(
+        barmode="stack",
+        title=title,
+        xaxis_title=x_title,
+        yaxis_title="",
+        showlegend=True,
+    )
+    polish_figure_layout(fig)
+    return fig
+
+
 def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
     """Lorenz curve: cumulative share of output vs. cumulative share of authors.
 

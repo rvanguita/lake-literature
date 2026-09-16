@@ -24,7 +24,7 @@ from lake_literature.dashboard.analytics import (
     output_impact_correlation,
     valid_years,
 )
-from lake_literature.dashboard.charts import lorenz_chart, topn_hbar
+from lake_literature.dashboard.charts import lorenz_chart, source_topn_hbar, topn_hbar
 from lake_literature.dashboard.components import (
     article_table,
     hero_banner,
@@ -138,19 +138,26 @@ def render() -> None:
 
 def _top_authors(author_rows: pd.DataFrame) -> None:
     st.subheader("✍️ Autores mais prolíficos (canonicalizado)")
-    counts = (
-        author_rows.groupby("author_display")["doi"].nunique()
-        if "doi" in author_rows.columns
-        else author_rows.groupby("author_display").size()
-    )
-    top = counts.sort_values(ascending=False).head(15)
-    modal_source = (
-        author_rows.groupby("author_display")["source"].agg(lambda s: s.mode().iat[0])
-        if "source" in author_rows.columns
-        else None
-    )
-    fig = topn_hbar(top, color_by=modal_source, x_title="Artigos")
-    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    count_col = "doi" if "doi" in author_rows.columns else "author_display"
+    agg = "nunique" if count_col == "doi" else "size"
+    counts = author_rows.groupby("author_display")[count_col].agg(agg)
+    top_index = counts.sort_values(ascending=False).head(15).index
+
+    if "source" in author_rows.columns:
+        scoped = author_rows[author_rows["author_display"].isin(top_index)]
+        by_source = (
+            scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in by_source.columns:
+                by_source[src] = 0
+        by_source["total"] = counts.reindex(top_index)
+        by_source = by_source.reindex(top_index).reset_index()
+        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    else:
+        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     render_chart(fig)
 
 
