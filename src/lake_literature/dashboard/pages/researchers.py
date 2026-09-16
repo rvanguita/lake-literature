@@ -17,14 +17,22 @@ from lake_literature.dashboard.analytics import (
     author_productivity_trend,
     author_year_matrix,
     canonical_author,
+    cumulative_researchers,
     explode_authors,
     explode_keywords,
     gini_coefficient,
     lorenz_curve,
     output_impact_correlation,
+    researchers_by_year,
     valid_years,
 )
-from lake_literature.dashboard.charts import lorenz_chart, source_topn_hbar, topn_hbar
+from lake_literature.dashboard.charts import (
+    lorenz_chart,
+    source_bars,
+    source_lines,
+    source_topn_hbar,
+    topn_hbar,
+)
 from lake_literature.dashboard.components import (
     article_table,
     hero_banner,
@@ -114,6 +122,10 @@ def render() -> None:
         _top_authors(author_rows)
 
     with tab_production:
+        _researchers_by_year(articles_df)
+        st.divider()
+        _cumulative_researchers_chart(articles_df)
+        st.divider()
         _production_heatmap(author_rows)
         st.divider()
         _emerging_vs_established(author_rows)
@@ -159,6 +171,50 @@ def _top_authors(author_rows: pd.DataFrame) -> None:
         fig = topn_hbar(counts.reindex(top_index), x_title="Artigos")
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     render_chart(fig)
+
+
+def _researchers_by_year(articles_df: pd.DataFrame) -> None:
+    st.subheader("👥 Pesquisadores ativos por ano")
+    by_year = researchers_by_year(articles_df)
+    if by_year.empty:
+        st.info("Sem anos válidos para este gráfico.")
+        return
+
+    fig = source_bars(by_year, "year", total_line=True)
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Pesquisadores distintos",
+    )
+    render_chart(
+        fig,
+        caption="Autores canonicalizados distintos que publicaram em cada ano, por base. Um autor "
+        "publicando nas duas bases no mesmo ano conta uma vez em cada base, mas apenas uma vez no "
+        "Total — por isso o Total pode ser menor que a soma de IEEE + Elsevier.",
+    )
+
+
+def _cumulative_researchers_chart(articles_df: pd.DataFrame) -> None:
+    st.subheader("📈 Pesquisadores acumulados")
+    cum = cumulative_researchers(articles_df)
+    if cum.empty:
+        st.info("Sem anos válidos para o acumulado.")
+        return
+
+    fig = source_lines(
+        cum,
+        "year",
+        title="Pesquisadores distintos acumulados por ano",
+        y_title="Pesquisadores acumulados",
+    )
+    fig.update_layout(xaxis_title="Ano de publicação")
+    render_chart(
+        fig,
+        caption=f"Cada pesquisador é contado uma única vez, no ano da sua primeira publicação "
+        f"identificada no corpus (por base, e no geral para o Total). Ao final do período, o corpus "
+        f"acumula {int(cum['total'].iloc[-1]):,} pesquisadores distintos "
+        f"({int(cum['ieee'].iloc[-1]):,} IEEE, {int(cum['elsevier'].iloc[-1]):,} Elsevier).",
+    )
 
 
 def _production_heatmap(author_rows: pd.DataFrame) -> None:

@@ -290,6 +290,78 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return pivot.reset_index()[["author", *_MATRIX_SUMMARY_COLS, *year_cols]]
 
 
+def _exploded_author_years(df: pd.DataFrame) -> pd.DataFrame:
+    """Shared prep for author-by-year aggregations: explode, canonicalize, valid years only."""
+    exploded = explode_authors(df)
+    if exploded.empty:
+        return exploded
+    exploded["author_key"] = exploded["author"].apply(canonical_author)
+    exploded = exploded[exploded["author_key"] != ""]
+    exploded["year"] = valid_years(exploded)
+    return exploded.dropna(subset=["year"]).astype({"year": int})
+
+
+def researchers_by_year(df: pd.DataFrame) -> pd.DataFrame:
+    """Distinct canonical-author count per year, split ieee/elsevier/total.
+
+    Unlike `source_counts_by` (which counts rows), `total` here is counted
+    independently as the number of distinct authors active that year
+    regardless of source -- an author publishing in both IEEE and Elsevier
+    the same year must count once in `total`, not twice. `ieee`/`elsevier`
+    default to 0 when a `source` column isn't present.
+    """
+    exploded = _exploded_author_years(df)
+    if exploded.empty:
+        return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
+
+    years = sorted(exploded["year"].unique())
+    result = pd.DataFrame({"year": years})
+    has_source = "source" in exploded.columns
+    for src in ("ieee", "elsevier"):
+        if has_source:
+            counts = exploded[exploded["source"] == src].groupby("year")["author_key"].nunique()
+            result[src] = result["year"].map(counts).fillna(0).astype(int)
+        else:
+            result[src] = 0
+    total_counts = exploded.groupby("year")["author_key"].nunique()
+    result["total"] = result["year"].map(total_counts).fillna(0).astype(int)
+    return result
+
+
+def cumulative_researchers(df: pd.DataFrame) -> pd.DataFrame:
+    """Cumulative count of distinct researchers introduced by each year.
+
+    Each canonical author is counted once, in the year of their earliest
+    valid-year appearance (within that source, for `ieee`/`elsevier`; across
+    all sources, for `total`) -- summing each year's *active* researcher
+    count would double-count an author active across multiple years, which
+    isn't what a cumulative researcher count should mean. As with every other
+    ieee/elsevier/total triple here, `total` isn't required to equal
+    `ieee + elsevier` -- an author's first IEEE year and first Elsevier year
+    can differ from their first-ever appearance.
+    """
+    exploded = _exploded_author_years(df)
+    if exploded.empty:
+        return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
+
+    years = sorted(exploded["year"].unique())
+
+    def cumulative_new(sub: pd.DataFrame) -> pd.Series:
+        if sub.empty:
+            return pd.Series(0, index=years, dtype="int64")
+        first_year = sub.groupby("author_key")["year"].min()
+        by_year = first_year.value_counts().reindex(years, fill_value=0)
+        return by_year.cumsum()
+
+    result = pd.DataFrame({"year": years})
+    has_source = "source" in exploded.columns
+    for src in ("ieee", "elsevier"):
+        sub = exploded[exploded["source"] == src] if has_source else exploded.iloc[0:0]
+        result[src] = cumulative_new(sub).to_numpy()
+    result["total"] = cumulative_new(exploded).to_numpy()
+    return result
+
+
 def gini_coefficient(values: pd.Series) -> float:
     """Gini coefficient of a distribution of non-negative values (0..1).
 

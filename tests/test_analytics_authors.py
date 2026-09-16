@@ -3,8 +3,10 @@ import pandas as pd
 from lake_literature.dashboard.analytics import (
     author_productivity_trend,
     author_year_matrix,
+    cumulative_researchers,
     gini_coefficient,
     output_impact_correlation,
+    researchers_by_year,
 )
 
 
@@ -141,3 +143,48 @@ def test_output_impact_correlation_returns_none_below_minimum_sample():
     result = output_impact_correlation(df, "citation_count")
     assert result["pearson"] is None
     assert result["spearman"] is None
+
+
+def _mixed_source_authors_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"authors": ["J. Liu"], "year": 2019, "doi": "b1", "source": "ieee"},
+            {"authors": ["Junyong Liu"], "year": 2020, "doi": "b2", "source": "elsevier"},
+            {"authors": ["Junyong Liu"], "year": 2020, "doi": "b3", "source": "ieee"},
+            {"authors": ["B. Costa"], "year": 2020, "doi": "b4", "source": "elsevier"},
+            {"authors": ["B. Costa"], "year": 2021, "doi": "b5", "source": "elsevier"},
+        ]
+    )
+
+
+def test_researchers_by_year_counts_distinct_authors_not_rows():
+    by_year = researchers_by_year(_mixed_source_authors_df()).set_index("year")
+
+    # 2020: Liu (both sources) and Costa (elsevier) are active -- Liu counts
+    # once in "total" despite appearing in both sources that year.
+    assert by_year.loc[2020, "ieee"] == 1
+    assert by_year.loc[2020, "elsevier"] == 2
+    assert by_year.loc[2020, "total"] == 2
+    assert by_year.loc[2019, "total"] == 1
+    assert by_year.loc[2021, "total"] == 1
+
+
+def test_researchers_by_year_empty_when_no_authors():
+    empty = pd.DataFrame({"year": [2020, 2021]})
+    assert researchers_by_year(empty).empty
+
+
+def test_cumulative_researchers_counts_each_author_once_at_first_appearance():
+    cum = cumulative_researchers(_mixed_source_authors_df()).set_index("year")
+
+    # Liu's first-ever appearance is 2019 (ieee); Costa's is 2020 (elsevier).
+    # A researcher active across multiple years must not be re-counted.
+    assert list(cum["total"]) == [1, 2, 2]
+    assert list(cum["ieee"]) == [1, 1, 1]
+    assert list(cum["elsevier"]) == [0, 2, 2]
+
+
+def test_cumulative_researchers_is_non_decreasing():
+    cum = cumulative_researchers(_mixed_source_authors_df())
+    for col in ("ieee", "elsevier", "total"):
+        assert (cum[col].diff().dropna() >= 0).all()
