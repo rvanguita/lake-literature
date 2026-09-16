@@ -15,8 +15,8 @@ since the pipeline is meant to be run on demand from the dashboard.
 from __future__ import annotations
 
 import pendulum
-from airflow.sdk import DAG
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.sdk import DAG
 
 PROJECT_DIR = "/opt/airflow/project"
 START_DATE = pendulum.datetime(2024, 1, 1, tz="UTC")
@@ -57,5 +57,5 @@ with DAG(
     tags=["lake-literature"],
 ):
     tasks = [BashOperator(task_id=stage, bash_command=_bash_command(stage)) for stage in STAGES]
-    for upstream, downstream in zip(tasks, tasks[1:]):
+    for upstream, downstream in zip(tasks, tasks[1:], strict=False):
         upstream >> downstream

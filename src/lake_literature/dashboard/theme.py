@@ -6,7 +6,11 @@ and keeps the venue/categorical palettes from drifting apart over time.
 
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 # Brand colors -- IEEE blue and Elsevier orange, from each publisher's own brand
 # guidelines. Used everywhere a chart breaks down by source, so the same two
@@ -21,8 +25,14 @@ SOURCE_LABELS = {"ieee": "IEEE", "elsevier": "Elsevier"}
 # derived from SOURCE_COLORS. "Others" (the catch-all bucket) always gets a
 # neutral gray instead of a palette slot -- it isn't a real category.
 CATEGORICAL_PALETTE = [
-    "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
-    "#e87ba4", "#008300", "#4a3aa7", "#e34948",
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#e87ba4",
+    "#008300",
+    "#4a3aa7",
+    "#e34948",
 ]
 OTHER_COLOR = "#9a9a94"
 
@@ -51,16 +61,20 @@ CHART_HEIGHT = 420  # consistent height for side-by-side chart pairs
 # ---------------------------------------------------------------------------
 
 _DARK_TOKENS = {
-    "bg_top": "#07131f", "bg_mid": "#0b1725", "bg_bottom": "#0f1d2b",
+    "bg_top": "#07131f",
+    "bg_mid": "#0b1725",
+    "bg_bottom": "#0f1d2b",
     "sidebar_bg": "rgba(10, 18, 28, 0.95)",
     "border": "rgba(148, 163, 184, 0.18)",
-    "text": "#e5eefb", "muted": "#a5b7d5",
+    "text": "#e5eefb",
+    "muted": "#a5b7d5",
     "accent": "#5ea9ff",
     "input_bg": "rgba(17, 24, 39, 0.9)",
     "input_border": "rgba(148, 163, 184, 0.2)",
     "metric_bg": "linear-gradient(135deg, rgba(12, 46, 75, 0.96), rgba(18, 78, 140, 0.72))",
     "metric_border": "rgba(94, 169, 255, 0.24)",
-    "metric_label": "#d7e8ff", "metric_value": "#f8fbff",
+    "metric_label": "#d7e8ff",
+    "metric_value": "#f8fbff",
     "table_bg": "linear-gradient(180deg, rgba(12, 28, 38, 0.98), rgba(16, 31, 45, 0.94))",
     "table_border": "rgba(94, 169, 255, 0.25)",
     "expander_bg": "linear-gradient(180deg, rgba(14, 31, 44, 0.95), rgba(19, 38, 54, 0.92))",
@@ -69,27 +83,35 @@ _DARK_TOKENS = {
     "tab_bg": "rgba(12, 24, 34, 0.7)",
     "tab_active_bg": "rgba(94, 169, 255, 0.12)",
     "alert_bg": "rgba(17, 24, 39, 0.6)",
-    "chart_bg": "#0b1725", "chart_text": "#e5eefb", "chart_tick": "#dfeaf9",
+    "chart_bg": "#0b1725",
+    "chart_text": "#e5eefb",
+    "chart_tick": "#dfeaf9",
     "chart_annotation": "#f8fbff",
-    "grid": "rgba(148,163,184,0.16)", "axis_line": "rgba(148,163,184,0.30)",
+    "grid": "rgba(148,163,184,0.16)",
+    "axis_line": "rgba(148,163,184,0.30)",
     # A solid navy-blue "card" tint (matches the metric_bg gradient's second
     # stop -- Plotly's legend.bgcolor can't render a CSS gradient) so the
     # legend reads as a distinct floating chip instead of nearly disappearing
     # into chart_bg (#0b1725), which the previous near-identical rgba did.
-    "legend_bg": "rgba(18, 78, 140, 0.55)", "legend_border": "rgba(94, 169, 255, 0.35)",
+    "legend_bg": "rgba(18, 78, 140, 0.55)",
+    "legend_border": "rgba(94, 169, 255, 0.35)",
 }
 
 _LIGHT_TOKENS = {
-    "bg_top": "#eef3fb", "bg_mid": "#f6f9fd", "bg_bottom": "#ffffff",
+    "bg_top": "#eef3fb",
+    "bg_mid": "#f6f9fd",
+    "bg_bottom": "#ffffff",
     "sidebar_bg": "rgba(255, 255, 255, 0.96)",
     "border": "rgba(15, 23, 42, 0.12)",
-    "text": "#101728", "muted": "#48536b",
+    "text": "#101728",
+    "muted": "#48536b",
     "accent": "#1d6fd6",
     "input_bg": "rgba(241, 245, 251, 0.95)",
     "input_border": "rgba(15, 23, 42, 0.15)",
     "metric_bg": "linear-gradient(135deg, rgba(219, 234, 254, 0.95), rgba(191, 219, 254, 0.65))",
     "metric_border": "rgba(29, 111, 214, 0.28)",
-    "metric_label": "#1d4e89", "metric_value": "#0b1725",
+    "metric_label": "#1d4e89",
+    "metric_value": "#0b1725",
     "table_bg": "linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 253, 0.96))",
     "table_border": "rgba(29, 111, 214, 0.22)",
     "expander_bg": "linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(241, 245, 251, 0.95))",
@@ -98,10 +120,14 @@ _LIGHT_TOKENS = {
     "tab_bg": "rgba(15, 23, 42, 0.04)",
     "tab_active_bg": "rgba(29, 111, 214, 0.10)",
     "alert_bg": "rgba(15, 23, 42, 0.04)",
-    "chart_bg": "#ffffff", "chart_text": "#101728", "chart_tick": "#33415c",
+    "chart_bg": "#ffffff",
+    "chart_text": "#101728",
+    "chart_tick": "#33415c",
     "chart_annotation": "#0b1725",
-    "grid": "rgba(15,23,42,0.08)", "axis_line": "rgba(15,23,42,0.22)",
-    "legend_bg": "rgba(255,255,255,0.88)", "legend_border": "rgba(15,23,42,0.14)",
+    "grid": "rgba(15,23,42,0.08)",
+    "axis_line": "rgba(15,23,42,0.22)",
+    "legend_bg": "rgba(255,255,255,0.88)",
+    "legend_border": "rgba(15,23,42,0.14)",
 }
 
 
@@ -446,6 +472,10 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
     try:
         fig.update_traces(textfont=dict(weight="bold", color=t["chart_annotation"]))
     except Exception:
-        pass
+        # Not every trace type accepts a bold textfont weight; this is a
+        # cosmetic best-effort, not a correctness concern.
+        logger.debug(
+            "polish_figure_layout: textfont update unsupported for this trace type", exc_info=True
+        )
     if height:
         fig.update_layout(height=height)

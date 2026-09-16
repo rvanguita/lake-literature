@@ -15,6 +15,7 @@ from lake_literature.dashboard.theme import (
     SOURCE_COLORS,
     SOURCE_LABELS,
     TOTAL_COLOR,
+    hex_to_rgba,
 )
 
 LAYER_ORDER = ("raw", "bronze", "silver", "gold")
@@ -137,7 +138,7 @@ def _sankey_funnel(funnel_df: pd.DataFrame) -> None:
                 source=sources,
                 target=targets,
                 value=values,
-                color=[_hex_to_rgba(c, 0.55) for c in link_colors],
+                color=[hex_to_rgba(c, 0.55) for c in link_colors],
             ),
         )
     )
@@ -151,15 +152,13 @@ def _sankey_funnel(funnel_df: pd.DataFrame) -> None:
     )
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
-    return f"rgba({r},{g},{b},{alpha})"
-
-
 def _retention_by_stage(funnel_df: pd.DataFrame) -> None:
     st.subheader("Retenção por etapa e por base")
     long_df = funnel_df.melt(
-        id_vars="source", value_vars=["raw", "bronze", "silver", "gold"], var_name="layer", value_name="count"
+        id_vars="source",
+        value_vars=["raw", "bronze", "silver", "gold"],
+        var_name="layer",
+        value_name="count",
     )
     long_df["layer"] = pd.Categorical(long_df["layer"], categories=LAYER_ORDER, ordered=True)
     long_df = long_df.sort_values("layer")
@@ -167,7 +166,12 @@ def _retention_by_stage(funnel_df: pd.DataFrame) -> None:
     fig = go.Figure()
     for src in ("ieee", "elsevier"):
         sub = long_df[long_df["source"] == src]
-        fig.add_bar(x=sub["layer"], y=sub["count"], name=SOURCE_LABELS.get(src, src), marker_color=SOURCE_COLORS.get(src))
+        fig.add_bar(
+            x=sub["layer"],
+            y=sub["count"],
+            name=SOURCE_LABELS.get(src, src),
+            marker_color=SOURCE_COLORS.get(src),
+        )
     fig.update_layout(barmode="stack")
 
     totals = long_df.groupby("layer", observed=True)["count"].sum().reindex(LAYER_ORDER)
@@ -245,14 +249,20 @@ def _metadata_coverage_by_layer() -> None:
         return
 
     coverage_df = pd.DataFrame(rows)
-    coverage_df["layer"] = pd.Categorical(coverage_df["layer"], categories=["bronze", "silver", "gold"], ordered=True)
+    coverage_df["layer"] = pd.Categorical(
+        coverage_df["layer"], categories=["bronze", "silver", "gold"], ordered=True
+    )
     fig = px.bar(
         coverage_df.sort_values("layer"),
         x="field",
         y="coverage",
         color="layer",
         barmode="group",
-        color_discrete_sequence=[CATEGORICAL_PALETTE[1], CATEGORICAL_PALETTE[0], CATEGORICAL_PALETTE[2]],
+        color_discrete_sequence=[
+            CATEGORICAL_PALETTE[1],
+            CATEGORICAL_PALETTE[0],
+            CATEGORICAL_PALETTE[2],
+        ],
         labels={"field": "", "coverage": "% preenchido", "layer": "Camada"},
     )
     fig.update_traces(hovertemplate="<b>%{x}</b><br>%{data.name}: %{y:.1f}%<extra></extra>")

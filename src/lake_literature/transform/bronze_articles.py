@@ -77,9 +77,7 @@ def _upsert(session: Session, source: str, source_id: str, **fields) -> None:
 
 def _build_ieee_records(raw_session: Session, bronze_session: Session) -> int:
     csv_rows = raw_session.scalars(select(IeeeCsvRow)).all()
-    bib_entries = raw_session.scalars(
-        select(BibEntry).where(BibEntry.source == "ieee")
-    ).all()
+    bib_entries = raw_session.scalars(select(BibEntry).where(BibEntry.source == "ieee")).all()
 
     bib_by_doi: dict[str, BibEntry] = {}
     for entry in bib_entries:
@@ -173,9 +171,7 @@ def _build_ieee_records(raw_session: Session, bronze_session: Session) -> int:
 
 
 def _build_elsevier_records(raw_session: Session, bronze_session: Session) -> int:
-    bib_entries = raw_session.scalars(
-        select(BibEntry).where(BibEntry.source == "elsevier")
-    ).all()
+    bib_entries = raw_session.scalars(select(BibEntry).where(BibEntry.source == "elsevier")).all()
     written = 0
     for entry in bib_entries:
         f = entry.fields

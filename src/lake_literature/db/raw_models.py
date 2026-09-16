@@ -29,9 +29,7 @@ class SourceFile(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer)
     mtime: Mapped[dt.datetime] = mapped_column(DateTime)
-    ingested_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow
-    )
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
 
 class Config(Base):

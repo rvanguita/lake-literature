@@ -31,9 +31,7 @@ def _load_bib_dir(session: Session, source: str, directory) -> int:
             continue
 
         library = bibtexparser.parse_file(str(bib_path))
-        session.execute(
-            delete(BibEntry).where(BibEntry.source_file == stored_path)
-        )
+        session.execute(delete(BibEntry).where(BibEntry.source_file == stored_path))
 
         for entry in library.entries:
             fields = {f.key: f.value for f in entry.fields}

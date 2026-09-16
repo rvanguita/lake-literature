@@ -48,8 +48,8 @@ class Article(Base):
     pdf_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    bronze_ids: Mapped[list] = mapped_column(JSON, default=list)  # source bronze.articles ids merged
+    bronze_ids: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # source bronze.articles ids merged
 
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow
-    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)

@@ -18,9 +18,7 @@ def load_pdf_inventory(session) -> int:
     for pdf_path in sorted(ARTICLES_DIR.glob("*.pdf")):
         record_source_file(session, pdf_path, source="articles", kind="pdf")
 
-        existing = session.scalar(
-            select(PdfFile).where(PdfFile.filename == pdf_path.name)
-        )
+        existing = session.scalar(select(PdfFile).where(PdfFile.filename == pdf_path.name))
         stat = pdf_path.stat()
         sha = sha256_file(pdf_path)
         if existing is None:

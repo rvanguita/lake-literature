@@ -87,9 +87,21 @@ def _render_series_forecast(label: str, color: str, result: ForecastResult) -> N
         partial_note = f"{err:,.1f} (vs. {HOLDOUT_YEAR}, parcial)"
     metric_row(
         [
-            ("🧮 Modelo escolhido", _MODEL_LABELS.get(result.chosen_model, result.chosen_model), None),
-            ("📉 MAE de validação", partial_note or "N/D", f"CV 2023–2025: {result.cv_mae:.1f}" if result.cv_mae == result.cv_mae else None),
-            ("📈 R² (ajuste no treino)", f"{result.r2_train:.2f}" if result.r2_train == result.r2_train else "N/D", None),
+            (
+                "🧮 Modelo escolhido",
+                _MODEL_LABELS.get(result.chosen_model, result.chosen_model),
+                None,
+            ),
+            (
+                "📉 MAE de validação",
+                partial_note or "N/D",
+                f"CV 2023–2025: {result.cv_mae:.1f}" if result.cv_mae == result.cv_mae else None,
+            ),
+            (
+                "📈 R² (ajuste no treino)",
+                f"{result.r2_train:.2f}" if result.r2_train == result.r2_train else "N/D",
+                None,
+            ),
             (
                 f"🔮 Previsão {result.forecast_years[0]}",
                 f"{result.forecast_values[0]:,.0f}",
@@ -165,7 +177,12 @@ def _render_series_forecast(label: str, color: str, result: ForecastResult) -> N
                 y=[result.history.loc[next_year]],
                 name=f"{next_year} (parcial/antecipado)",
                 mode="markers",
-                marker=dict(size=13, symbol="star", color=TOTAL_COLOR, line=dict(width=2, color=t["chart_bg"])),
+                marker=dict(
+                    size=13,
+                    symbol="star",
+                    color=TOTAL_COLOR,
+                    line=dict(width=2, color=t["chart_bg"]),
+                ),
                 hovertemplate=f"{next_year} já tem %{{y:,.0f}} registros indexados (parcial)<extra></extra>",
             )
         )
@@ -200,7 +217,9 @@ def _render_series_forecast(label: str, color: str, result: ForecastResult) -> N
         )
 
 
-def _keyword_trend_lines(keywords: list[str], results_by_keyword: dict[str, ForecastResult]) -> None:
+def _keyword_trend_lines(
+    keywords: list[str], results_by_keyword: dict[str, ForecastResult]
+) -> None:
     """Actual trajectory (solid) + forecast continuation (dashed) per topic.
 
     The ranking bar next to this only shows the net change between two
@@ -302,14 +321,18 @@ def _keyword_growth_ranking(articles_df: pd.DataFrame) -> None:
 
     col_trend, col_rank = st.columns([3, 2])
     with col_trend:
-        _keyword_trend_lines(ranking.head(TOP_KEYWORD_TRENDS)["keyword"].tolist(), results_by_keyword)
+        _keyword_trend_lines(
+            ranking.head(TOP_KEYWORD_TRENDS)["keyword"].tolist(), results_by_keyword
+        )
     with col_rank:
         fig = go.Figure()
         fig.add_bar(
             x=top["variação"],
             y=top["keyword"],
             orientation="h",
-            marker_color=[TOTAL_COLOR if v >= 0 else SOURCE_COLORS["ieee"] for v in top["variação"]],
+            marker_color=[
+                TOTAL_COLOR if v >= 0 else SOURCE_COLORS["ieee"] for v in top["variação"]
+            ],
             hovertemplate=f"<b>%{{y}}</b><br>Variação projetada até {final_forecast_year}: %{{x:+.1f}} artigos/ano<extra></extra>",
         )
         fig.update_layout(

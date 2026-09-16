@@ -18,7 +18,13 @@ from lake_literature.dashboard.analytics import (
     valid_years,
 )
 from lake_literature.dashboard.charts import topn_hbar
-from lake_literature.dashboard.components import article_table, hero_banner, metric_row, page_header, render_chart
+from lake_literature.dashboard.components import (
+    article_table,
+    hero_banner,
+    metric_row,
+    page_header,
+    render_chart,
+)
 from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, theme_tokens
 
 TOP_AUTHORS = 25
@@ -27,7 +33,9 @@ TOP_NETWORK_AUTHORS = 18
 RECENT_WINDOW_YEARS = 5
 
 
-@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)})
+@st.cache_data(
+    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
+)
 def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     """Explode authors, canonicalize identity, and keep one display name per key."""
     exploded = explode_authors(articles_df)
@@ -64,7 +72,11 @@ def render() -> None:
     )
 
     n_authors = author_rows["author_key"].nunique()
-    per_author_counts = author_rows.groupby("author_key")["doi"].nunique() if "doi" in author_rows.columns else author_rows.groupby("author_key").size()
+    per_author_counts = (
+        author_rows.groupby("author_key")["doi"].nunique()
+        if "doi" in author_rows.columns
+        else author_rows.groupby("author_key").size()
+    )
     n_5plus = int((per_author_counts >= 5).sum())
     n_3plus = int((per_author_counts >= 3).sum())
     metric_row(
@@ -72,7 +84,11 @@ def render() -> None:
             ("👥 Autores distintos (canonicalizados)", f"{n_authors:,}", None),
             ("🏅 Com ≥5 artigos", f"{n_5plus:,}", None),
             ("📗 Com ≥3 artigos", f"{n_3plus:,}", None),
-            ("✍️ Média de autores/artigo", f"{articles_df['authors'].apply(lambda a: len(a) if isinstance(a, list) else 0).mean():.1f}", None),
+            (
+                "✍️ Média de autores/artigo",
+                f"{articles_df['authors'].apply(lambda a: len(a) if isinstance(a, list) else 0).mean():.1f}",
+                None,
+            ),
         ]
     )
 
@@ -94,7 +110,11 @@ def render() -> None:
 
 def _top_authors(author_rows: pd.DataFrame) -> None:
     st.subheader("✍️ Autores mais prolíficos (canonicalizado)")
-    counts = author_rows.groupby("author_display")["doi"].nunique() if "doi" in author_rows.columns else author_rows.groupby("author_display").size()
+    counts = (
+        author_rows.groupby("author_display")["doi"].nunique()
+        if "doi" in author_rows.columns
+        else author_rows.groupby("author_display").size()
+    )
     top = counts.sort_values(ascending=False).head(15)
     modal_source = (
         author_rows.groupby("author_display")["source"].agg(lambda s: s.mode().iat[0])
@@ -116,9 +136,17 @@ def _production_heatmap(author_rows: pd.DataFrame) -> None:
         return
 
     top_authors = (
-        working.groupby("author_display")["doi"].nunique().sort_values(ascending=False).head(TOP_AUTHORS).index
+        working.groupby("author_display")["doi"]
+        .nunique()
+        .sort_values(ascending=False)
+        .head(TOP_AUTHORS)
+        .index
         if "doi" in working.columns
-        else working.groupby("author_display").size().sort_values(ascending=False).head(TOP_AUTHORS).index
+        else working.groupby("author_display")
+        .size()
+        .sort_values(ascending=False)
+        .head(TOP_AUTHORS)
+        .index
     )
     scoped = working[working["author_display"].isin(top_authors)]
     pivot = scoped.groupby(["author_display", "year"]).size().unstack(fill_value=0)
@@ -226,9 +254,16 @@ def _coauthorship_network(author_rows: pd.DataFrame) -> None:
     # nodes. A much smaller, fixed circular layout trades "shows everyone" for
     # "every connection is actually legible" -- no physics, no randomness, no
     # possible overlap (evenly spaced points on a circle can't collide).
-    top_authors = counts[counts >= MIN_PAPERS_FOR_NETWORK].sort_values(ascending=False).head(TOP_NETWORK_AUTHORS).index
+    top_authors = (
+        counts[counts >= MIN_PAPERS_FOR_NETWORK]
+        .sort_values(ascending=False)
+        .head(TOP_NETWORK_AUTHORS)
+        .index
+    )
     if len(top_authors) < 3:
-        st.info(f"Poucos autores com ≥{MIN_PAPERS_FOR_NETWORK} artigos para montar uma rede legível.")
+        st.info(
+            f"Poucos autores com ≥{MIN_PAPERS_FOR_NETWORK} artigos para montar uma rede legível."
+        )
         return
 
     scoped = author_rows[author_rows["author_display"].isin(top_authors)]
@@ -267,7 +302,10 @@ def _coauthorship_network(author_rows: pd.DataFrame) -> None:
 
     radius = 9.0
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    pos = {node: np.array([radius * np.cos(a), radius * np.sin(a)]) for node, a in zip(order, angles)}
+    pos = {
+        node: np.array([radius * np.cos(a), radius * np.sin(a)])
+        for node, a in zip(order, angles, strict=True)
+    }
 
     degree = dict(graph.degree())
     weighted_degree = dict(graph.degree(weight="weight"))
@@ -349,15 +387,26 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
         return
 
     dois_with_kw = set(kw_exploded.loc[kw_exploded["keyword"] == selected, "doi"].dropna())
-    scoped_authors = author_rows[author_rows["doi"].isin(dois_with_kw)] if "doi" in author_rows.columns else author_rows.iloc[0:0]
+    scoped_authors = (
+        author_rows[author_rows["doi"].isin(dois_with_kw)]
+        if "doi" in author_rows.columns
+        else author_rows.iloc[0:0]
+    )
     if scoped_authors.empty:
         st.info("Nenhum autor associado a esse termo nesta camada.")
         return
 
-    leaders = scoped_authors.groupby("author_display")["doi"].nunique().sort_values(ascending=False).head(10)
+    leaders = (
+        scoped_authors.groupby("author_display")["doi"]
+        .nunique()
+        .sort_values(ascending=False)
+        .head(10)
+    )
     col_leaders, col_trend = st.columns(2)
     with col_leaders:
-        fig = topn_hbar(leaders, title=f"Autores mais produtivos em '{selected}'", x_title="Artigos")
+        fig = topn_hbar(
+            leaders, title=f"Autores mais produtivos em '{selected}'", x_title="Artigos"
+        )
         render_chart(fig)
     with col_trend:
         trend_df = scoped_authors.copy()
@@ -391,17 +440,25 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
 
 def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame) -> None:
     st.subheader("🏷️ Perfil de palavras-chave por autor")
-    counts = author_rows.groupby("author_display")["doi"].nunique() if "doi" in author_rows.columns else author_rows.groupby("author_display").size()
+    counts = (
+        author_rows.groupby("author_display")["doi"].nunique()
+        if "doi" in author_rows.columns
+        else author_rows.groupby("author_display").size()
+    )
     eligible = counts[counts >= 3].sort_values(ascending=False)
     if eligible.empty:
         st.info("Nenhum autor com pelo menos 3 artigos nesta camada.")
         return
 
-    selected_author = st.selectbox("Selecione um autor (mínimo 3 artigos):", options=eligible.index.tolist())
+    selected_author = st.selectbox(
+        "Selecione um autor (mínimo 3 artigos):", options=eligible.index.tolist()
+    )
     if not selected_author:
         return
 
-    author_dois = set(author_rows.loc[author_rows["author_display"] == selected_author, "doi"].dropna())
+    author_dois = set(
+        author_rows.loc[author_rows["author_display"] == selected_author, "doi"].dropna()
+    )
     subset = articles_df[articles_df["doi"].isin(author_dois)]
     kw_exploded = explode_keywords(subset)
     if kw_exploded.empty:
@@ -415,7 +472,9 @@ def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame
 
     col_overall, col_shift = st.columns(2)
     with col_overall:
-        fig = topn_hbar(top_terms, title=f"Palavras-chave dominantes de {selected_author}", x_title="Menções")
+        fig = topn_hbar(
+            top_terms, title=f"Palavras-chave dominantes de {selected_author}", x_title="Menções"
+        )
         render_chart(fig)
     with col_shift:
         if working["year"].nunique() < 2:
@@ -431,9 +490,25 @@ def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame
                     "late": late.reindex(all_terms, fill_value=0),
                 }
             )
-            compare = compare[(compare["early"] + compare["late"]) > 0].sort_values("late", ascending=False).head(10)
+            compare = (
+                compare[(compare["early"] + compare["late"]) > 0]
+                .sort_values("late", ascending=False)
+                .head(10)
+            )
             fig = go.Figure()
-            fig.add_bar(x=compare.index, y=compare["early"], name=f"até {split_year}", marker_color=CATEGORICAL_PALETTE[0])
-            fig.add_bar(x=compare.index, y=compare["late"], name=f"após {split_year}", marker_color=CATEGORICAL_PALETTE[2])
-            fig.update_layout(barmode="group", title="Mudança de foco: início vs. fim da carreira no corpus")
+            fig.add_bar(
+                x=compare.index,
+                y=compare["early"],
+                name=f"até {split_year}",
+                marker_color=CATEGORICAL_PALETTE[0],
+            )
+            fig.add_bar(
+                x=compare.index,
+                y=compare["late"],
+                name=f"após {split_year}",
+                marker_color=CATEGORICAL_PALETTE[2],
+            )
+            fig.update_layout(
+                barmode="group", title="Mudança de foco: início vs. fim da carreira no corpus"
+            )
             render_chart(fig)

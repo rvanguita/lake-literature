@@ -38,9 +38,7 @@ def load_ieee_csv(session: Session) -> int:
             continue
 
         df = pd.read_csv(csv_path)
-        session.execute(
-            delete(IeeeCsvRow).where(IeeeCsvRow.source_file == stored_path)
-        )
+        session.execute(delete(IeeeCsvRow).where(IeeeCsvRow.source_file == stored_path))
 
         for idx, row in df.iterrows():
             fields = {col: _clean_value(row[col]) for col in df.columns}

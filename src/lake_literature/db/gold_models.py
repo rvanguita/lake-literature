@@ -41,9 +41,7 @@ class Article(Base):
 
     silver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow
-    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
 
 class Chunk(Base):
@@ -60,6 +58,4 @@ class Chunk(Base):
     embedding: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # filled by --stage embed
     embed_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow
-    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)

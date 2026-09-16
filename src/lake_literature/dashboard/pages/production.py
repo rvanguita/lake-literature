@@ -116,7 +116,10 @@ def _cumulative_production(articles_df: pd.DataFrame) -> None:
             st.info("Sem dados de periódico suficientes para o acumulado por revista.")
         else:
             venue_order = (
-                venue_cum.groupby("venue")["cumulative"].max().sort_values(ascending=False).index.tolist()
+                venue_cum.groupby("venue")["cumulative"]
+                .max()
+                .sort_values(ascending=False)
+                .index.tolist()
             )
             venue_order = [v for v in venue_order if v != OTHERS_LABEL] + (
                 [OTHERS_LABEL] if OTHERS_LABEL in venue_order else []
@@ -166,9 +169,7 @@ def _venue_comparison(articles_df: pd.DataFrame) -> None:
                 sub["venue"].dropna().value_counts().head(TOP_VENUES_PER_SOURCE).index.tolist()
             )
             sub = sub.astype({"year": int}).copy()
-            sub["venue_grouped"] = sub["venue"].where(
-                sub["venue"].isin(top_venues), OTHERS_LABEL
-            )
+            sub["venue_grouped"] = sub["venue"].where(sub["venue"].isin(top_venues), OTHERS_LABEL)
             by_year_venue = (
                 sub.groupby(["year", "venue_grouped"])
                 .size()
@@ -261,9 +262,7 @@ def _collaboration(articles_df: pd.DataFrame) -> None:
 
         if "source" in trend.columns:
             by_year_auth_src = (
-                trend.groupby(["year", "source"])["n_authors"]
-                .mean()
-                .reset_index(name="mean")
+                trend.groupby(["year", "source"])["n_authors"].mean().reset_index(name="mean")
             )
             fig = px.line(
                 by_year_auth_src,
