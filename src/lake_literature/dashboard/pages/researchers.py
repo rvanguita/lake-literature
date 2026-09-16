@@ -637,6 +637,42 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
             fig.update_traces(line_color=CATEGORICAL_PALETTE[2])
             render_chart(fig)
 
+    st.divider()
+    keyword_articles = articles_df[articles_df["doi"].isin(dois_with_kw)]
+    kw_by_year = researchers_by_year(keyword_articles)
+    kw_cum = cumulative_researchers(keyword_articles)
+    col_kw_year, col_kw_cum = st.columns(2)
+    with col_kw_year:
+        if kw_by_year.empty:
+            st.info("Sem anos válidos para este gráfico.")
+        else:
+            fig = source_bars(kw_by_year, "year", total_line=True)
+            fig.update_layout(
+                hovermode="x unified",
+                xaxis_title="Ano de publicação",
+                yaxis_title="Pesquisadores distintos",
+            )
+            render_chart(
+                fig,
+                caption=f"Pesquisadores distintos que publicaram em '{selected}' a cada ano, por base.",
+            )
+    with col_kw_cum:
+        if kw_cum.empty:
+            st.info("Sem anos válidos para o acumulado.")
+        else:
+            fig = source_lines(
+                kw_cum,
+                "year",
+                title=f"Pesquisadores acumulados em '{selected}'",
+                y_title="Pesquisadores acumulados",
+            )
+            fig.update_layout(xaxis_title="Ano de publicação")
+            render_chart(
+                fig,
+                caption="Total acumulado de pesquisadores distintos que já publicaram em "
+                f"'{selected}' até cada ano ({int(kw_cum['total'].iloc[-1]):,} ao final do período).",
+            )
+
     top_dois = scoped_authors["doi"].unique()
     subset = articles_df[articles_df["doi"].isin(top_dois)]
     if "citation_count" in subset.columns:
