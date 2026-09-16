@@ -83,6 +83,7 @@ def render() -> None:
             sub_a3_vol,
             sub_a3_cum,
             sub_a3_rank,
+            sub_a1_a3_combined,
         ) = st.tabs(
             [
                 "🏆 Ranking",
@@ -98,6 +99,7 @@ def render() -> None:
                 "🥉 A3 — Volume Anual",
                 "🥉 A3 — Acumulado",
                 "🥉 A3 — Ranking",
+                "🎖️ A1-A3 — Acumulado",
             ]
         )
         with sub_ranking:
@@ -124,6 +126,8 @@ def render() -> None:
                     _qualis_tier_cumulative(tier, tier_articles[tier])
                 with sub_rank:
                     _qualis_tier_ranking(tier, tier_articles[tier])
+            with sub_a1_a3_combined:
+                _qualis_a1_a3_combined(tier_articles)
 
     with tab_keywords:
         sub_top, sub_stats = st.tabs(["🏷️ Top 20 Palavras-Chave", "📊 Estatísticas do Vocabulário"])
@@ -609,3 +613,38 @@ def _qualis_tier_ranking(tier: str, tier_articles_df: pd.DataFrame) -> None:
     )
     fig = source_topn_hbar(top_tier, "venue", x_title="Artigos")
     render_chart(fig, caption=f"Periódicos {tier} mais publicados pelo corpus.")
+
+
+def _qualis_a1_a3_combined(tier_articles: dict[str, pd.DataFrame]) -> None:
+    st.subheader("Periódicos A1-A3 — Acumulado")
+    combined_df = pd.concat([tier_articles["A1"], tier_articles["A2"], tier_articles["A3"]])
+    if combined_df.empty:
+        st.info("Nenhum artigo em periódico classificado A1, A2 ou A3 nesta camada/filtro.")
+        return
+
+    col_volume, col_ranking = st.columns(2)
+    with col_volume:
+        years_df = combined_df.copy()
+        years_df["year"] = valid_years(years_df)
+        years_df = years_df.dropna(subset=["year"]).astype({"year": int})
+        by_year = source_counts_by(years_df, "year").sort_values("year")
+        if by_year.empty:
+            st.info("Sem anos válidos para este gráfico.")
+        else:
+            fig = source_bars(by_year, "year", total_line=True)
+            fig.update_layout(
+                hovermode="x unified", xaxis_title="Ano de publicação", yaxis_title="Artigos"
+            )
+            render_chart(
+                fig,
+                caption="Volume anual de artigos publicados em periódicos A1, A2 ou A3, por base.",
+            )
+    with col_ranking:
+        top_combined = (
+            source_counts_by(combined_df, "venue").sort_values("total", ascending=False).head(15)
+        )
+        fig = source_topn_hbar(top_combined, "venue", x_title="Artigos")
+        render_chart(
+            fig,
+            caption="Periódicos mais publicados pelo corpus, somando os estratos A1, A2 e A3.",
+        )

@@ -32,8 +32,14 @@ def render() -> None:
         "publishers pode retornar resultados diferentes dos capturados aqui.",
     )
 
-    for _, row in configs_df.iterrows():
-        _source_card(row)
+    sources = list(configs_df["source"])
+    tabs = st.tabs([f"{_SOURCE_EMOJI.get(s, '📰')} {SOURCE_LABELS.get(s, s)}" for s in sources])
+    for tab, (_, row) in zip(tabs, configs_df.iterrows(), strict=True):
+        with tab:
+            _source_card(row)
+
+
+_SOURCE_EMOJI = {"ieee": "🔷", "elsevier": "🟠"}
 
 
 def _source_card(row: pd.Series) -> None:
@@ -41,28 +47,27 @@ def _source_card(row: pd.Series) -> None:
     label = SOURCE_LABELS.get(source, source)
     color = SOURCE_COLORS.get(source, "#9a9a94")
 
-    with st.container(border=True):
-        st.markdown(
-            f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">● {label}</span>',
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">● {label}</span>',
+        unsafe_allow_html=True,
+    )
 
-        query_string = row.get("query_string") or "—"
-        st.caption("Query")
-        st.code(query_string, language=None, wrap_lines=True)
+    query_string = row.get("query_string") or "—"
+    st.caption("Query")
+    st.code(query_string, language=None, wrap_lines=True)
 
-        col_filters, col_years = st.columns(2)
-        with col_filters:
-            st.caption("Filtros aplicados")
-            st.write(row.get("filters") or "—")
-        with col_years:
-            st.caption("Intervalo de anos")
-            st.write(row.get("year_range") or "—")
+    col_filters, col_years = st.columns(2)
+    with col_filters:
+        st.caption("Filtros aplicados")
+        st.write(row.get("filters") or "—")
+    with col_years:
+        st.caption("Intervalo de anos")
+        st.write(row.get("year_range") or "—")
 
-        search_url = row.get("search_url")
-        if search_url:
-            st.markdown(f"🔗 [Abrir esta busca no site original]({search_url})")
+    search_url = row.get("search_url")
+    if search_url:
+        st.markdown(f"🔗 [Abrir esta busca no site original]({search_url})")
 
-        with st.expander("Texto bruto do config.csv"):
-            st.text(row.get("raw_text") or "—")
-            st.caption(f"Arquivo de origem: `{row.get('source_file') or '—'}`")
+    with st.expander("Texto bruto do config.csv"):
+        st.text(row.get("raw_text") or "—")
+        st.caption(f"Arquivo de origem: `{row.get('source_file') or '—'}`")
