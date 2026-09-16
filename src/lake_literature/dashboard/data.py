@@ -1,9 +1,10 @@
 """Data-loading helpers for the Streamlit dashboard.
 
-Reads directly from the medallion MySQL databases (via the same per-layer
-engines the pipeline uses) and returns plain pandas DataFrames. Every
-function tolerates a layer/table that doesn't exist yet -- the dashboard is
-meant to be usable even before the pipeline has been run end to end.
+Reads directly from the single `medalhao` MySQL database (via the same
+engine the pipeline uses, see `db/engines.py`) and returns plain pandas
+DataFrames. Every function tolerates a layer/table that doesn't exist yet --
+the dashboard is meant to be usable even before the pipeline has been run
+end to end.
 """
 
 from __future__ import annotations
@@ -19,10 +20,22 @@ from lake_literature.db.engines import get_engine
 logger = logging.getLogger(__name__)
 
 LAYER_TABLES = {
-    "raw": ["source_files", "config", "ieee_csv_rows", "bib_entries", "pdf_files"],
-    "bronze": ["articles"],
-    "silver": ["articles"],
-    "gold": ["articles", "chunks"],
+    "raw": [
+        "lit_source_files",
+        "lit_config",
+        "lit_ieee_csv_rows",
+        "lit_bib_entries",
+        "lit_pdf_files",
+    ],
+    "bronze": ["lit_articles_bronze"],
+    "silver": ["lit_articles_silver"],
+    "gold": ["lit_articles_gold", "lit_chunks"],
+}
+
+ARTICLES_TABLE = {
+    "bronze": "lit_articles_bronze",
+    "silver": "lit_articles_silver",
+    "gold": "lit_articles_gold",
 }
 
 
@@ -60,18 +73,19 @@ def layer_row_counts() -> pd.DataFrame:
 
 
 def load_articles(layer: str) -> pd.DataFrame:
-    if not table_exists(layer, "articles"):
+    table = ARTICLES_TABLE[layer]
+    if not table_exists(layer, table):
         return pd.DataFrame()
     engine = get_engine(layer)
-    return pd.read_sql_table("articles", engine)
+    return pd.read_sql_table(table, engine)
 
 
 def load_search_configs() -> pd.DataFrame:
-    """Per-source search provenance from `raw.config` (query, filters, year range, URL)."""
-    if not table_exists("raw", "config"):
+    """Per-source search provenance from `raw.lit_config` (query, filters, year range, URL)."""
+    if not table_exists("raw", "lit_config"):
         return pd.DataFrame()
     engine = get_engine("raw")
-    return pd.read_sql_table("config", engine)
+    return pd.read_sql_table("lit_config", engine)
 
 
 def pick_best_articles_layer() -> tuple[str, pd.DataFrame]:
@@ -94,10 +108,10 @@ def load_articles_all_layers() -> dict[str, pd.DataFrame]:
 
 
 def load_chunks() -> pd.DataFrame:
-    if not table_exists("gold", "chunks"):
+    if not table_exists("gold", "lit_chunks"):
         return pd.DataFrame()
     engine = get_engine("gold")
-    return pd.read_sql_table("chunks", engine)
+    return pd.read_sql_table("lit_chunks", engine)
 
 
 def raw_funnel_counts() -> dict[str, dict[str, int]]:
@@ -114,13 +128,13 @@ def raw_funnel_counts() -> dict[str, dict[str, int]]:
     try:
         engine = get_engine("raw")
         with engine.connect() as conn:
-            if inspect(engine).has_table("ieee_csv_rows"):
+            if inspect(engine).has_table("lit_ieee_csv_rows"):
                 counts["ieee"]["csv_rows"] = (
-                    conn.execute(text("SELECT COUNT(*) FROM `ieee_csv_rows`")).scalar() or 0
+                    conn.execute(text("SELECT COUNT(*) FROM `lit_ieee_csv_rows`")).scalar() or 0
                 )
-            if inspect(engine).has_table("bib_entries"):
+            if inspect(engine).has_table("lit_bib_entries"):
                 for source, n in conn.execute(
-                    text("SELECT source, COUNT(*) FROM `bib_entries` GROUP BY source")
+                    text("SELECT source, COUNT(*) FROM `lit_bib_entries` GROUP BY source")
                 ):
                     counts.setdefault(source, {"csv_rows": 0, "bib_entries": 0})
                     counts[source]["bib_entries"] = n
@@ -139,11 +153,12 @@ def bronze_doi_dropped_counts() -> dict[str, int]:
     result = {"ieee": 0, "elsevier": 0}
     try:
         engine = get_engine("bronze")
-        if not inspect(engine).has_table("articles"):
+        table = ARTICLES_TABLE["bronze"]
+        if not inspect(engine).has_table(table):
             return result
         with engine.connect() as conn:
             for source, n in conn.execute(
-                text("SELECT source, COUNT(*) FROM `articles` WHERE doi IS NULL GROUP BY source")
+                text(f"SELECT source, COUNT(*) FROM `{table}` WHERE doi IS NULL GROUP BY source")
             ):
                 result[source] = n
     except SQLAlchemyError:

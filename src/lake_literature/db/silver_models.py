@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 
 class Article(Base):
-    __tablename__ = "articles"
+    __tablename__ = "lit_articles_silver"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 

@@ -47,7 +47,7 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
 
 - **Primary user**: the researcher/author assembling the corpus and deciding what to cite (also the operator
   running the pipeline and dashboard locally).
-- **Secondary/future user**: an LLM agent consuming `gold.chunks` + embeddings to answer "which papers support
+- **Secondary/future user**: an LLM agent consuming `lit_chunks` + embeddings to answer "which papers support
   claim X" — this is the direction the `embed` stage exists to enable, even though no agent-facing retrieval
   API exists yet.
 
@@ -69,7 +69,7 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
    (or the full pipeline) after updating the corpus, and watch its status without leaving the dashboard.
 7. As the researcher, I use "Configuração da Busca" to recall exactly which query, filters, and year range
    produced the current corpus, so I can reproduce or extend the search later.
-8. (Future) As an LLM agent, I query `gold.chunks` by embedding similarity to retrieve the passages most
+8. (Future) As an LLM agent, I query `lit_chunks` by embedding similarity to retrieve the passages most
    relevant to a citation question and return their source DOIs.
 
 ## 6. Functional requirements
@@ -77,21 +77,22 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
 ### Pipeline (CLI: `uv run lake-literature --stage <raw|bronze|silver|gold|embed|all>`)
 
 - `raw`: ingest `config.csv`, IEEE CSV rows, all BibTeX entries (both sources), and the PDF inventory,
-  verbatim, keyed for idempotent re-ingestion (`source_files` manifest, sha256-based).
-- `bronze`: union IEEE and Elsevier records into one typed `articles` schema; collapse pure pagination
-  duplicates within a source; no cross-source dedup yet.
-- `silver`: deduplicate bronze articles by normalized DOI into one row per paper; compute quality flags
-  (`has_abstract`, `has_doi`, `is_duplicate_merge`); fuzzy-match against `data/articles/*.pdf` and record
-  `has_pdf`/`pdf_path`/`pdf_match_score`.
-- `gold`: produce the curated, RAG-facing `articles` table plus `chunks` (abstract chunks for every article,
-  full-text chunks for PDF-linked ones).
-- `embed`: fill `chunks.embedding`/`chunks.embed_model` for chunks that don't have one yet; safe to re-run
+  verbatim, keyed for idempotent re-ingestion (`lit_source_files` manifest, sha256-based).
+- `bronze`: union IEEE and Elsevier records into one typed `lit_articles_bronze` schema; collapse pure
+  pagination duplicates within a source; no cross-source dedup yet.
+- `silver`: deduplicate bronze articles by normalized DOI into one row per paper (`lit_articles_silver`);
+  compute quality flags (`has_abstract`, `has_doi`, `is_duplicate_merge`); fuzzy-match against
+  `data/articles/*.pdf` and record `has_pdf`/`pdf_path`/`pdf_match_score`.
+- `gold`: produce the curated, RAG-facing `lit_articles_gold` table plus `lit_chunks` (abstract chunks for
+  every article, full-text chunks for PDF-linked ones).
+- `embed`: fill `lit_chunks.embedding`/`lit_chunks.embed_model` for chunks that don't have one yet; safe to re-run
   after every `gold` run without re-embedding existing chunks.
-- `all`: run all five stages in order, bootstrapping all four MySQL databases first.
+- `all`: run all five stages in order, bootstrapping the single `medalhao` MySQL database first.
 
 ### Dashboard (Streamlit, `uv run streamlit run main.py` or `docker compose up dashboard`)
 
-Nine pages as listed in the README's page table, each reading from the relevant layer's MySQL database. The
+Nine pages as listed in the README's page table, each reading from the relevant layer's table in the shared
+MySQL database. The
 "Camadas & Pipeline" and "Qualidade e RAG" pages additionally act as a control surface: they trigger Airflow
 DAG runs and poll status, rather than running pipeline code in-process.
 
@@ -103,21 +104,21 @@ behavior is identical whether triggered locally or from Airflow.
 
 ## 7. Success metrics / acceptance signals
 
-- **No duplicate DOIs** in `silver.articles`/`gold.articles` after a full pipeline run over the current
-  corpus.
+- **No duplicate DOIs** in `lit_articles_silver`/`lit_articles_gold` after a full pipeline run over the
+  current corpus.
 - **Idempotent re-runs**: running `--stage all` twice in a row on an unchanged `data/` directory does not
   change row counts in any layer.
-- **PDF-link precision**: `silver.articles.has_pdf` is true only for articles whose fuzzy-matched PDF is
+- **PDF-link precision**: `lit_articles_silver.has_pdf` is true only for articles whose fuzzy-matched PDF is
   actually about that article (spot-checked manually; `pdf_match_score` gives a per-row confidence signal).
 - **Embedding coverage**: the "Qualidade e RAG" gauge reaches 100% after running `--stage embed` to
   completion, and stays there on subsequent `gold` reruns until new chunks are added.
 - **Dashboard correctness**: page-level counts (e.g. total articles, IEEE vs. Elsevier split) match direct
-  queries against the corresponding MySQL database.
+  queries against the corresponding table.
 
 ## 8. Out of scope for this iteration / open questions
 
 - **Retrieval**: implemented. The "Qualidade e RAG" dashboard page runs real cosine-similarity search over
-  `chunks.embedding` (`dashboard/search.py`) once the `embed` stage has populated it, falling back to keyword
+  `lit_chunks.embedding` (`dashboard/search.py`) once the `embed` stage has populated it, falling back to keyword
   matching only when no chunk has an embedding yet. This is in-process similarity over a pandas DataFrame, not
   a persisted vector index — acceptable at the corpus's current size (a few thousand chunks), but would need a
   real vector store if the corpus grew by an order of magnitude or more.

@@ -9,15 +9,19 @@ This is the authoring-side skill for the pipeline itself (`src/lake_literature/{
 and `pipeline.py`) — how to actually *run* it, locally or via Airflow, is the `pipeline-ops` skill instead.
 Dashboard code (`dashboard/`) has its own `streamlit-dashboard` skill.
 
-## One database per layer, same table names
+## One database, layer-prefixed/suffixed table names
 
-Four independent MySQL databases — `lit_raw`, `lit_bronze`, `lit_silver`, `lit_gold` (prefix from
-`MYSQL_DB_PREFIX`) — each with its own SQLAlchemy `Base` in `db/{raw,bronze,silver,gold}_models.py`. Table
-names repeat across layers (`articles`, etc.) but each layer's `Article` model has a different, layer-
-appropriate field set — don't assume a column on one layer's model exists on another's.
+All four layers share a single MySQL database, `medalhao` (`MYSQL_DATABASE`), each with its own SQLAlchemy
+`Base` in `db/{raw,bronze,silver,gold}_models.py`. Because everything lives in one database, table names
+must be unique across layers: raw's tables (`lit_source_files`, `lit_config`, `lit_ieee_csv_rows`,
+`lit_bib_entries`, `lit_pdf_files`) and gold's `lit_chunks` were already unique and keep their plain names;
+the three `Article` models collide on the obvious name, so they're disambiguated with a layer suffix —
+`lit_articles_bronze`, `lit_articles_silver`, `lit_articles_gold` — each with a different, layer-appropriate
+field set. Don't assume a column on one layer's `Article` model exists on another's.
 
 `db/engines.py`'s `get_engine(layer)` (`@cache`d) / `get_session(layer)` is the one access point — always go
-through it, never construct an engine/session directly.
+through it, never construct an engine/session directly. `layer` is still validated against `LAYERS` for
+typo-safety even though every layer now resolves to the same shared engine/database.
 
 ## Adding a new column
 
@@ -56,7 +60,7 @@ stats dict. Wire a new stage into `STAGES` and `run_all()`/`run()` in `pipeline.
 ## Ingest loader idempotency (`ingest/raw_*.py`)
 
 Every raw-layer loader follows the same pattern via `ingest/hashing.py`: hash the source file
-(`sha256_file`), check it against `raw.source_files` via `record_source_file()`, and skip re-ingesting an
+(`sha256_file`), check it against `raw.lit_source_files` via `record_source_file()`, and skip re-ingesting an
 unchanged file. Follow this pattern for any new `ingest/raw_*.py` loader rather than inventing a new
 change-detection scheme.
 

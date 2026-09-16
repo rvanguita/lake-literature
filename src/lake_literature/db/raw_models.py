@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 class SourceFile(Base):
     """Manifest of every file ingested, for idempotent re-runs."""
 
-    __tablename__ = "source_files"
+    __tablename__ = "lit_source_files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # 512 chars * 4 bytes (utf8mb4) = 2048 bytes, under MySQL's 3072-byte max key
@@ -35,7 +35,7 @@ class SourceFile(Base):
 class Config(Base):
     """Parsed provenance from data/{ieee,elsevier}/config.csv (free text)."""
 
-    __tablename__ = "config"
+    __tablename__ = "lit_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), unique=True)
@@ -50,7 +50,7 @@ class Config(Base):
 class IeeeCsvRow(Base):
     """One row per line of data/ieee/export*.csv, columns kept as text."""
 
-    __tablename__ = "ieee_csv_rows"
+    __tablename__ = "lit_ieee_csv_rows"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     row_index: Mapped[int] = mapped_column(Integer)
@@ -65,7 +65,7 @@ class IeeeCsvRow(Base):
 class BibEntry(Base):
     """One row per BibTeX entry, either source, fields kept as raw JSON."""
 
-    __tablename__ = "bib_entries"
+    __tablename__ = "lit_bib_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), index=True)  # 'ieee' | 'elsevier'
@@ -82,7 +82,7 @@ class BibEntry(Base):
 class PdfFile(Base):
     """Inventory of data/articles/*.pdf."""
 
-    __tablename__ = "pdf_files"
+    __tablename__ = "lit_pdf_files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     filename: Mapped[str] = mapped_column(String(255), unique=True)  # 255*4=1020 bytes

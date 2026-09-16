@@ -1,4 +1,9 @@
-"""SQLAlchemy engine/session factories, one per medallion layer."""
+"""SQLAlchemy engine/session factories.
+
+All four medallion layers share one MySQL database (`medalhao`); `layer` is
+kept as a parameter purely for call-site readability and typo-safety (see
+`LAYERS`), not because it selects a different engine.
+"""
 
 from __future__ import annotations
 
@@ -11,11 +16,15 @@ from lake_literature.config import LAYERS, get_settings
 
 
 @cache
+def _shared_engine() -> Engine:
+    settings = get_settings()
+    return create_engine(settings.database_url(), pool_pre_ping=True, future=True)
+
+
 def get_engine(layer: str) -> Engine:
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r}, expected one of {LAYERS}")
-    settings = get_settings()
-    return create_engine(settings.layer_url(layer), pool_pre_ping=True, future=True)
+    return _shared_engine()
 
 
 def get_session(layer: str) -> Session:

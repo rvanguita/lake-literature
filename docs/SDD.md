@@ -17,18 +17,19 @@ data/articles/──▶│ (pipeline.py)│      │              │──▶ A
                           (Airflow DAGs)
 ```
 
-- **Storage**: one MySQL database per medallion layer (`raw`, `bronze`, `silver`, `gold`), same table names
-  reused across databases where the schema carries forward (all named `<prefix>_<layer>`, prefix from
-  `MYSQL_DB_PREFIX`). SQLAlchemy 2.0 declarative models, one `Base`/module set per layer under
-  `src/lake_literature/db/`.
+- **Storage**: a single MySQL database, `medalhao` (`MYSQL_DATABASE`), shared by all four medallion layers
+  (`raw`, `bronze`, `silver`, `gold`). Table names are disambiguated per layer instead of by living in
+  separate databases: raw's tables and gold's `lit_chunks` were already unique, and the three per-layer
+  `Article` tables carry a layer suffix (`lit_articles_bronze`/`lit_articles_silver`/`lit_articles_gold`).
+  SQLAlchemy 2.0 declarative models, one `Base`/module set per layer under `src/lake_literature/db/`.
 - **Compute**: pure Python/pandas transforms, no Spark or distributed processing — the corpus is a few
   hundred records, so single-process batch jobs are sufficient.
 - **Orchestration**: Apache Airflow (`airflow/dags/lake_literature_dags.py`), used purely as a scheduler/UI
   layer over the same CLI the developer runs locally — DAG tasks are `BashOperator` calls to
   `uv run lake-literature --stage <stage>`, so pipeline logic has zero Airflow import dependency and behaves
   identically whether triggered from a terminal or from Airflow.
-- **UI**: Streamlit multipage app (`src/lake_literature/dashboard/`), read-only against the four MySQL
-  databases except for two "trigger a pipeline stage" actions that go through Airflow's REST API rather than
+- **UI**: Streamlit multipage app (`src/lake_literature/dashboard/`), read-only against the shared MySQL
+  database except for two "trigger a pipeline stage" actions that go through Airflow's REST API rather than
   running pipeline code in-process (see §5).
 - **Deployment**: Docker Compose with two services (`dashboard`, `airflow`), see §6.
 
@@ -36,57 +37,59 @@ data/articles/──▶│ (pipeline.py)│      │              │──▶ A
 
 ### 2.1 Layer-by-layer schema
 
-**raw** (`<prefix>_raw`, `src/lake_literature/db/raw_models.py`) — verbatim ingestion, one table per source
-artifact type, nothing normalized or deduplicated:
+All tables below live in the single `medalhao` database.
+
+**raw** (`src/lake_literature/db/raw_models.py`) — verbatim ingestion, one table per source artifact type,
+nothing normalized or deduplicated:
 
 | Table | Purpose | Key fields |
 |---|---|---|
-| `source_files` | Manifest of every ingested file, for idempotent re-runs | `path` (unique), `source`, `kind`, `sha256`, `size_bytes`, `mtime` |
-| `config` | Parsed provenance from each source's `config.csv` | `source` (unique), `query_string`, `filters`, `year_range`, `search_url`, `raw_text` |
-| `ieee_csv_rows` | One row per line of `data/ieee/export*.csv` | `fields` (JSON blob of all CSV columns), `doi`, unique on `(source_file, row_index)` |
-| `bib_entries` | One row per BibTeX entry (either source) | `source`, `bib_key`, `entry_type`, `fields` (JSON), `doi`, unique on `(source, bib_key, source_file)` |
-| `pdf_files` | Inventory of `data/articles/*.pdf` | `filename` (unique), `path`, `sha256`, `size_bytes` |
+| `lit_source_files` | Manifest of every ingested file, for idempotent re-runs | `path` (unique), `source`, `kind`, `sha256`, `size_bytes`, `mtime` |
+| `lit_config` | Parsed provenance from each source's `config.csv` | `source` (unique), `query_string`, `filters`, `year_range`, `search_url`, `raw_text` |
+| `lit_ieee_csv_rows` | One row per line of `data/ieee/export*.csv` | `fields` (JSON blob of all CSV columns), `doi`, unique on `(source_file, row_index)` |
+| `lit_bib_entries` | One row per BibTeX entry (either source) | `source`, `bib_key`, `entry_type`, `fields` (JSON), `doi`, unique on `(source, bib_key, source_file)` |
+| `lit_pdf_files` | Inventory of `data/articles/*.pdf` | `filename` (unique), `path`, `sha256`, `size_bytes` |
 
-**bronze** (`<prefix>_bronze`, `db/bronze_models.py`) — cross-source consolidation begins here: IEEE (csv+bib)
-and Elsevier (bib) unioned into one common, typed `articles` schema. Pure pagination duplicates within a
+**bronze** (`db/bronze_models.py`) — cross-source consolidation begins here: IEEE (csv+bib) and Elsevier
+(bib) unioned into one common, typed `lit_articles_bronze` schema. Pure pagination duplicates within a
 source are collapsed; there is no cross-source dedup or quality filtering yet.
 
-`articles`: `source`, `source_id`, `record_type`, `doi`, `title`, `authors[]` (JSON), `year`, `venue`,
+`lit_articles_bronze`: `source`, `source_id`, `record_type`, `doi`, `title`, `authors[]` (JSON), `year`, `venue`,
 `volume`, `issue`, `pages`, `issn`, `url`, `abstract`, `keywords[]` (JSON), `citation_count`,
 `reference_count`, `raw_bib_id`/`raw_csv_id` (back-references into raw), unique on `(source, source_id)`.
 
-**silver** (`<prefix>_silver`, `db/silver_models.py`) — cleaned, conformed, deduplicated: one row per
-normalized DOI (the reliable cross-source join key — normalize by stripping the `https://doi.org/` prefix and
-casefolding, per `CLAUDE.md`), with quality flags and a fuzzy-matched PDF link.
+**silver** (`db/silver_models.py`) — cleaned, conformed, deduplicated: one row per normalized DOI (the
+reliable cross-source join key — normalize by stripping the `https://doi.org/` prefix and casefolding, per
+`CLAUDE.md`), with quality flags and a fuzzy-matched PDF link.
 
-`articles`: `doi` (unique), `sources[]` (JSON — which publisher(s) contributed), `record_type`, `title`,
+`lit_articles_silver`: `doi` (unique), `sources[]` (JSON — which publisher(s) contributed), `record_type`, `title`,
 `authors[]`, `year`, `venue`, `volume`, `issue`, `pages`, `url`, `abstract`, `keywords[]`, `citation_count`,
 `reference_count`, quality flags (`has_abstract`, `has_doi`, `is_duplicate_merge`), PDF link
 (`has_pdf`, `pdf_path`, `pdf_match_score`), `bronze_ids[]` (JSON provenance list).
 
-**gold** (`<prefix>_gold`, `db/gold_models.py`) — curated, RAG-ready: `articles` is what a human or agent
-scans to decide which paper to cite; `chunks` is the RAG ingestion unit.
+**gold** (`db/gold_models.py`) — curated, RAG-ready: `lit_articles_gold` is what a human or agent scans to
+decide which paper to cite; `lit_chunks` is the RAG ingestion unit.
 
-`articles`: `doi` (unique), `sources[]`, `title`, `authors[]`, `year`, `venue`, `keywords[]`, `abstract`,
+`lit_articles_gold`: `doi` (unique), `sources[]`, `title`, `authors[]`, `year`, `venue`, `keywords[]`, `abstract`,
 `citation_count`, `reference_count`, `url`, `has_pdf`, `pdf_path`, `silver_id` (back-reference).
 
-`chunks`: `doi` (value-FK to `articles.doi`), `seq`, `chunk_type` (`abstract` | `fulltext`), `text`,
+`lit_chunks`: `doi` (value-FK to `lit_articles_gold.doi`), `seq`, `chunk_type` (`abstract` | `fulltext`), `text`,
 `char_len`, `embedding` (JSON, nullable), `embed_model` (nullable) — the latter two filled by the `embed`
 stage; NULL until that stage has run at least once for a given chunk.
 
 ### 2.2 Provenance chain
 
 ```
-raw.bib_entries / raw.ieee_csv_rows
+lit_bib_entries / lit_ieee_csv_rows         (raw)
         │  (raw_bib_id / raw_csv_id)
         ▼
-bronze.articles
+lit_articles_bronze
         │  (bronze_ids[])
         ▼
-silver.articles  (one row per normalized DOI)
+lit_articles_silver  (one row per normalized DOI)
         │  (silver_id)
         ▼
-gold.articles  ──▶  gold.chunks  ──▶  chunks.embedding (embed stage)
+lit_articles_gold  ──▶  lit_chunks  ──▶  lit_chunks.embedding (embed stage)
 ```
 
 Every layer keeps a back-reference to the layer below it, so any gold article or chunk can be traced back to
@@ -97,32 +100,32 @@ the filesystem; everything above it is a deterministic, rebuildable transform ov
 
 ### `ingest/` (raw layer, `src/lake_literature/ingest/`)
 
-- `raw_csv.py` — parses `data/ieee/export*.csv` into `ieee_csv_rows`, keeping all columns as an opaque JSON
+- `raw_csv.py` — parses `data/ieee/export*.csv` into `lit_ieee_csv_rows`, keeping all columns as an opaque JSON
   blob plus an extracted `doi`.
 - `raw_bib.py` — parses all `.bib` files from both `data/ieee/` and `data/elsevier/` using a real BibTeX
   parser (`bibtexparser`), required because IEEE's `.bib` files have no separator between entries (see
   `CLAUDE.md`) — naive line/`@`-splitting silently merges or truncates records.
 - `raw_config.py` — parses each source's free-text `config.csv` into structured provenance fields.
 - `raw_pdfs.py` — inventories `data/articles/*.pdf`.
-- `hashing.py` — sha256 helper used by the `source_files` manifest for idempotency.
+- `hashing.py` — sha256 helper used by the `lit_source_files` manifest for idempotency.
 - `enrichment.py` — shared helpers used when building bronze/silver records from raw JSON blobs.
 
 ### `transform/` (bronze/silver/gold/embed, `src/lake_literature/transform/`)
 
-- `bronze_articles.py` — reads `raw.bib_entries` + `raw.ieee_csv_rows`, normalizes field names/types per
-  source (see the IEEE-vs-Elsevier table in `CLAUDE.md`), writes `bronze.articles`.
-- `silver_articles.py` — reads `bronze.articles`, normalizes and groups by DOI, merges duplicate bronze rows
-  into one silver row per DOI, computes quality flags, fuzzy-matches titles against `raw.pdf_files` (via
-  `rapidfuzz`) to set `has_pdf`/`pdf_path`/`pdf_match_score`.
-- `gold_articles.py` — reads `silver.articles`, writes the curated `gold.articles` + `gold.chunks` (splits
-  abstracts and, where a PDF is linked, full text extracted via `pypdf`, into passages).
+- `bronze_articles.py` — reads `lit_bib_entries` + `lit_ieee_csv_rows`, normalizes field names/types per
+  source (see the IEEE-vs-Elsevier table in `CLAUDE.md`), writes `lit_articles_bronze`.
+- `silver_articles.py` — reads `lit_articles_bronze`, normalizes and groups by DOI, merges duplicate bronze
+  rows into one silver row per DOI, computes quality flags, fuzzy-matches titles against `lit_pdf_files` (via
+  `rapidfuzz`) to set `has_pdf`/`pdf_path`/`pdf_match_score`, writes `lit_articles_silver`.
+- `gold_articles.py` — reads `lit_articles_silver`, writes the curated `lit_articles_gold` + `lit_chunks`
+  (splits abstracts and, where a PDF is linked, full text extracted via `pypdf`, into passages).
 - `embeddings.py` — the `embed` stage: loads `fastembed`'s `BAAI/bge-small-en-v1.5` ONNX model, embeds every
-  `gold.chunks` row where `embedding IS NULL`, writes the vector back as JSON plus the model name. Entirely
+  `lit_chunks` row where `embedding IS NULL`, writes the vector back as JSON plus the model name. Entirely
   local, no external API, no GPU requirement.
 
 ## 4. Idempotency & re-run model
 
-- **Raw layer**: `source_files.sha256` + unique `path` is the re-ingestion guard — a file already recorded
+- **Raw layer**: `lit_source_files.sha256` + unique `path` is the re-ingestion guard — a file already recorded
   with a matching hash is skipped rather than re-inserted.
 - **Cross-environment path stability**: `config.py`'s `relative_path()`/`absolute_path()` store paths relative
   to `REPO_ROOT` rather than absolute, because the same file has a different absolute path on the host
@@ -132,10 +135,10 @@ the filesystem; everything above it is a deterministic, rebuildable transform ov
 - **Bronze/silver/gold**: each stage's `build_*` function is a full rebuild-from-source-layer pass keyed on
   natural keys (`(source, source_id)` for bronze, `doi` for silver/gold) with `UniqueConstraint`s enforcing
   no duplicates at the database level.
-- **Embed**: keyed on `chunks.embedding IS NULL`, so re-running after a `gold` rebuild that added new chunks
+- **Embed**: keyed on `lit_chunks.embedding IS NULL`, so re-running after a `gold` rebuild that added new chunks
   only processes the new ones.
-- **Bootstrap**: `db/bootstrap.py` creates all four databases/tables if missing, called at the start of every
-  `pipeline.run()`/`run_all()` invocation — safe to call repeatedly.
+- **Bootstrap**: `db/bootstrap.py` creates the single `medalhao` database and every layer's tables if
+  missing, called at the start of every `pipeline.run()`/`run_all()` invocation — safe to call repeatedly.
 
 ## 5. Orchestration
 
@@ -176,11 +179,11 @@ host into the `airflow` container (`dashboard` uses its own built image), so DAG
 code as a local `uv run` without requiring an image rebuild on every code change.
 
 `.env` (git-ignored, see `.env.example`) is the single configuration surface for both services:
-`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB_PREFIX`, `AIRFLOW_BASE_URL`.
+`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `AIRFLOW_BASE_URL`.
 
 ## 7. Retrieval
 
-`dashboard/search.py` implements real vector similarity search over `gold.chunks.embedding`, used by the
+`dashboard/search.py` implements real vector similarity search over `lit_chunks.embedding`, used by the
 "Qualidade e RAG" page's search box:
 
 - `_rank_by_similarity(query_vector, chunks_df, top_k)` — pure function, no Streamlit/model dependency: drops
@@ -194,7 +197,7 @@ code as a local `uv run` without requiring an image rebuild on every code change
 This is in-process cosine similarity over a pandas DataFrame — no vector database or ANN index. That's a
 deliberate scope choice for the corpus's current size (a few thousand chunks fit comfortably in memory); a
 real vector store (e.g. pgvector, FAISS) would be the next step if the corpus grows by an order of magnitude.
-`quality.py::_search_demo` falls back to substring matching over `chunks.text` when no chunk has an embedding
+`quality.py::_search_demo` falls back to substring matching over `lit_chunks.text` when no chunk has an embedding
 yet (e.g. right after `--stage gold` but before `--stage embed`), so the page never breaks on a fresh corpus.
 
 ## 8. Testing
