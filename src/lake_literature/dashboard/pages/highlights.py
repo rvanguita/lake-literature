@@ -42,7 +42,13 @@ def render() -> None:
     with tab_refs:
         ref_df = _reference_distribution_intro(articles_df)
         sub_hist, sub_ecdf, sub_box, sub_vs_cit, sub_top = st.tabs(
-            ["Histograma", "ECDF", "Box Plot", "Refs vs. Citações", "Mais Referenciados"]
+            [
+                "📊 Histograma",
+                "📈 ECDF",
+                "📦 Box Plot",
+                "🔗 Refs vs. Citações",
+                "📖 Mais Referenciados",
+            ]
         )
         with sub_hist:
             if ref_df is not None:
@@ -59,7 +65,7 @@ def render() -> None:
             _top_referenced(articles_df)
 
     with tab_citations:
-        sub_cited, sub_by_year = st.tabs(["Mais Citados", "Citados por Ano"])
+        sub_cited, sub_by_year = st.tabs(["🏆 Mais Citados", "📅 Citados por Ano"])
         with sub_cited:
             _top_cited(articles_df)
         with sub_by_year:
@@ -69,7 +75,7 @@ def render() -> None:
         _collaboration_team_size(articles_df)
 
     with tab_rankings:
-        sub_authors, sub_impact = st.tabs(["Autores Mais Prolíficos", "Impacto por Periódico"])
+        sub_authors, sub_impact = st.tabs(["✍️ Autores Mais Prolíficos", "📈 Impacto por Periódico"])
         with sub_authors:
             _top_authors(articles_df)
         with sub_impact:

@@ -321,7 +321,7 @@ def _keyword_growth_ranking(articles_df: pd.DataFrame) -> None:
     ranking = pd.DataFrame(rows).sort_values("variação", ascending=False)
     top = ranking.head(min(TOP_KEYWORDS_FORECAST, len(ranking))).sort_values("variação")
 
-    sub_trend, sub_rank = st.tabs(["Trajetórias", "Ranking de Crescimento"])
+    sub_trend, sub_rank = st.tabs(["📈 Trajetórias", "🏆 Ranking de Crescimento"])
     with sub_trend:
         _keyword_trend_lines(
             ranking.head(TOP_KEYWORD_TRENDS)["keyword"].tolist(), results_by_keyword

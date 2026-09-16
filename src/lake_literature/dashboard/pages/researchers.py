@@ -119,7 +119,7 @@ def render() -> None:
     )
 
     with tab_ranking:
-        sub_prolific, sub_lead = st.tabs(["Mais Prolíficos", "1º/2º Autor"])
+        sub_prolific, sub_lead = st.tabs(["✍️ Mais Prolíficos", "🥇 1º/2º Autor"])
         with sub_prolific:
             _top_authors(author_rows)
         with sub_lead:
@@ -135,12 +135,12 @@ def render() -> None:
             sub_emerging,
         ) = st.tabs(
             [
-                "Pesquisadores/Ano",
-                "Acumulado",
-                "1º/2º Autores/Ano",
-                "1º/2º Acumulado",
-                "Heatmap Top Autores",
-                "Emergentes vs. Consolidados",
+                "👥 Pesquisadores/Ano",
+                "📈 Acumulado",
+                "🥇 1º/2º Autores/Ano",
+                "📈 1º/2º Acumulado",
+                "🗓️ Heatmap Top Autores",
+                "🌱 Emergentes vs. Consolidados",
             ]
         )
         with sub_by_year:
@@ -169,12 +169,12 @@ def render() -> None:
             sub_kw_shift,
         ) = st.tabs(
             [
-                "Líderes da Linha",
-                "Trajetória Anual",
-                "Pesquisadores/Ano",
-                "Pesquisadores Acumulados",
-                "Perfil de Palavras-Chave",
-                "Mudança de Foco",
+                "🔎 Líderes da Linha",
+                "📈 Trajetória Anual",
+                "👥 Pesquisadores/Ano",
+                "📈 Pesquisadores Acumulados",
+                "🏷️ Perfil de Palavras-Chave",
+                "🔀 Mudança de Foco",
             ]
         )
         selected_kw, scoped_authors, dois_with_kw = _research_line_selector(
@@ -210,10 +210,10 @@ def render() -> None:
     with tab_stats:
         sub_table, sub_concentration, sub_trend_table, sub_vs_impact = st.tabs(
             [
-                "Tabela Completa",
-                "Concentração (Gini/Lorenz)",
-                "Tendência de Produtividade",
-                "Volume × Impacto",
+                "📋 Tabela Completa",
+                "📐 Concentração (Gini/Lorenz)",
+                "📈 Tendência de Produtividade",
+                "📊 Volume × Impacto",
             ]
         )
         with sub_table:

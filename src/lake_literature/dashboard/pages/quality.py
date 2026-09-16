@@ -55,7 +55,7 @@ def render() -> None:
     )
 
     with tab_metadata:
-        sub_abs, sub_kw = st.tabs(["Resumo", "Palavras-chave"])
+        sub_abs, sub_kw = st.tabs(["📝 Resumo", "🏷️ Palavras-chave"])
         _metadata_richness(articles_df, sub_abs, sub_kw)
 
     with tab_fulltext:
@@ -63,7 +63,12 @@ def render() -> None:
 
     with tab_chunks:
         sub_type, sub_len, sub_per_article, sub_embed = st.tabs(
-            ["Tipos de Chunk", "Tamanho dos Chunks", "Chunks por Artigo", "Cobertura de Embeddings"]
+            [
+                "🥧 Tipos de Chunk",
+                "📏 Tamanho dos Chunks",
+                "📚 Chunks por Artigo",
+                "🧠 Cobertura de Embeddings",
+            ]
         )
         if _chunks_intro(chunks_df):
             with sub_type:

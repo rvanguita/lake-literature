@@ -51,7 +51,7 @@ def render() -> None:
     )
 
     with tab_volume:
-        sub_ano, sub_qualis = st.tabs(["Por Ano", "CAPES/Qualis"])
+        sub_ano, sub_qualis = st.tabs(["📅 Por Ano", "🎓 CAPES/Qualis"])
         with sub_ano:
             _volume_by_year(articles_df)
         with sub_qualis:
@@ -152,7 +152,7 @@ def _cumulative_production(articles_df: pd.DataFrame) -> None:
         "Publicações acumuladas ano a ano — total e por base — seguidas da composição acumulada por "
         "periódico."
     )
-    sub_total, sub_venue = st.tabs(["Total", "Por Periódico"])
+    sub_total, sub_venue = st.tabs(["🌐 Total", "📰 Por Periódico"])
 
     with sub_total:
         cum = cumulative_by_source(articles_df)
@@ -227,7 +227,7 @@ def _venue_comparison(articles_df: pd.DataFrame) -> None:
         f"Publicações por ano discriminadas por periódico "
         f"(top {TOP_VENUES_PER_SOURCE} de cada base; os demais agrupados como '{OTHERS_LABEL}')."
     )
-    sub_ieee, sub_els = st.tabs([SOURCE_LABELS["ieee"], SOURCE_LABELS["elsevier"]])
+    sub_ieee, sub_els = st.tabs([f"🔷 {SOURCE_LABELS['ieee']}", f"🟠 {SOURCE_LABELS['elsevier']}"])
     for tab, src in ((sub_ieee, "ieee"), (sub_els, "elsevier")):
         with tab:
             sub = articles_df.copy()
@@ -288,7 +288,7 @@ def _collaboration(articles_df: pd.DataFrame) -> None:
 
     means = source_means(with_authors, "n_authors")
 
-    sub_dist, sub_trend = st.tabs(["Distribuição da Equipe", "Evolução do Tamanho"])
+    sub_dist, sub_trend = st.tabs(["📊 Distribuição da Equipe", "📈 Evolução do Tamanho"])
     with sub_dist:
         dist = (
             with_authors["n_authors"]
