@@ -19,6 +19,7 @@ from lake_literature.dashboard.theme import (
     SOURCE_LABELS,
     TOTAL_COLOR,
     TOTAL_LABEL,
+    hex_to_rgba,
     polish_figure_layout,
 )
 
@@ -70,40 +71,45 @@ def source_lines(
     *,
     title: str | None = None,
     y_title: str | None = None,
+    spline: bool = False,
+    fill: bool = False,
 ) -> go.Figure:
     """Three real line traces -- IEEE, Elsevier, and Total -- over `x`.
 
     `df` must have columns `[x, "ieee", "elsevier", "total"]`, e.g. from
     `analytics.cumulative_by_source` or `analytics.source_counts_by`.
+
+    `spline=True` smooths the lines. `fill=True` shades the area under a
+    source's line down to zero, but only when exactly one of IEEE/Elsevier
+    is actually present in `df` (e.g. the sidebar is filtered to one source)
+    -- filling both at once would just overlap two translucent regions with
+    no added meaning.
     """
+    line_shape = "spline" if spline else "linear"
+    active_sources = [src for src in ("ieee", "elsevier") if df[src].sum() > 0]
+    fill_single_source = fill and len(active_sources) == 1
+
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=df[x],
-            y=df["ieee"],
-            name=SOURCE_LABELS["ieee"],
-            mode="lines+markers",
-            line=dict(color=SOURCE_COLORS["ieee"], width=2),
-            marker=dict(size=5),
+    for src in ("ieee", "elsevier"):
+        line_kwargs: dict = {"x": df[x], "y": df[src], "mode": "lines+markers"}
+        if fill_single_source and src in active_sources:
+            line_kwargs["fill"] = "tozeroy"
+            line_kwargs["fillcolor"] = hex_to_rgba(SOURCE_COLORS[src], 0.2)
+        fig.add_trace(
+            go.Scatter(
+                name=SOURCE_LABELS[src],
+                line=dict(color=SOURCE_COLORS[src], width=2, shape=line_shape),
+                marker=dict(size=5),
+                **line_kwargs,
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df[x],
-            y=df["elsevier"],
-            name=SOURCE_LABELS["elsevier"],
-            mode="lines+markers",
-            line=dict(color=SOURCE_COLORS["elsevier"], width=2),
-            marker=dict(size=5),
-        )
-    )
     fig.add_trace(
         go.Scatter(
             x=df[x],
             y=df["total"],
             name=TOTAL_LABEL,
             mode="lines+markers",
-            line=dict(color=TOTAL_COLOR, width=2.5),
+            line=dict(color=TOTAL_COLOR, width=2.5, shape=line_shape),
             marker=dict(size=6),
         )
     )

@@ -16,6 +16,11 @@ import pandas as pd
 
 OTHERS_LABEL = "Outros"
 
+# Shared "recent activity" window used by both the Visão Geral and
+# Pesquisadores pages, so "recent" means the same thing (last 5 publication
+# years, inclusive of the latest) everywhere it's shown.
+RECENT_WINDOW_YEARS = 5
+
 
 def valid_years(df: pd.DataFrame, lo: int = 1950, hi: int = 2026) -> pd.Series:
     """Coerce `year` to numeric and drop rows outside a plausible window.
@@ -123,6 +128,22 @@ def source_means(df: pd.DataFrame, col: str) -> dict[str, float | None]:
     total_val = df[col].mean()
     result["total"] = float(total_val) if total_val == total_val else None
     return result
+
+
+def author_count_series(df: pd.DataFrame) -> pd.Series:
+    """Authors per row, from the `authors` list column.
+
+    A list counts by its length; a non-null non-list scalar (a defensive
+    fallback for a stray single-author value that never got wrapped in a
+    list) counts as 1; null counts as 0. Shared by every page that needs an
+    "authors per article" distribution or mean, so this edge case is handled
+    the same way everywhere instead of drifting between pages.
+    """
+    if "authors" not in df.columns:
+        return pd.Series(0, index=df.index, dtype="int64")
+    return df["authors"].apply(
+        lambda a: len(a) if isinstance(a, list) else (1 if pd.notna(a) else 0)
+    )
 
 
 def explode_authors(df: pd.DataFrame) -> pd.DataFrame:

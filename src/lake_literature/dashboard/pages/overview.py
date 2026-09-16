@@ -7,7 +7,12 @@ import plotly.express as px
 import streamlit as st
 
 from lake_literature.dashboard import loaders
-from lake_literature.dashboard.analytics import cumulative_by_source, source_counts_by, valid_years
+from lake_literature.dashboard.analytics import (
+    RECENT_WINDOW_YEARS,
+    cumulative_by_source,
+    source_counts_by,
+    valid_years,
+)
 from lake_literature.dashboard.charts import source_bars, source_lines, topn_hbar
 from lake_literature.dashboard.components import hero_banner, metric_row, page_header, render_chart
 from lake_literature.dashboard.theme import SOURCE_COLORS
@@ -52,7 +57,7 @@ def render() -> None:
         st.divider()
         st.subheader("Recência do Corpus")
         last_year = int(years_df["year"].max())
-        recent_share = (years_df["year"] >= last_year - 4).mean()
+        recent_share = (years_df["year"] >= last_year - RECENT_WINDOW_YEARS + 1).mean()
         metric_row(
             [
                 (
@@ -60,12 +65,17 @@ def render() -> None:
                     f"{int(years_df['year'].min())}–{last_year}",
                     None,
                 ),
-                ("🆕 Publicados nos últimos 5 anos", f"{recent_share:.1%}", None),
+                (
+                    f"🆕 Publicados nos últimos {RECENT_WINDOW_YEARS} anos",
+                    f"{recent_share:.1%}",
+                    None,
+                ),
                 ("📚 Artigos com ano identificado", f"{len(years_df):,}", None),
             ]
         )
         st.caption(
-            "Indica se a revisão se apoia em literatura recente ou se concentra em trabalhos pioneiros clássicos."
+            f"Janela de {RECENT_WINDOW_YEARS} anos (mesma usada na página Pesquisadores) — indica se a "
+            "revisão se apoia em literatura recente ou se concentra em trabalhos pioneiros clássicos."
         )
 
     st.divider()
@@ -174,6 +184,7 @@ def _numbers_summary(
         else 0
     )
 
+    st.markdown("**Cobertura**")
     metric_row(
         [
             ("📄 Artigos no Corpus", f"{n_total:,}", None),
@@ -182,6 +193,8 @@ def _numbers_summary(
             ("📎 Com PDF Vinculado", f"{n_pdf:,}", f"{n_pdf / n_total:.0%}"),
         ]
     )
+
+    st.markdown("**Qualidade bibliométrica**")
     metric_row(
         [
             (
@@ -199,6 +212,7 @@ def _numbers_summary(
         ]
     )
 
+    st.markdown("**Vocabulário**")
     n_venues = articles_df["venue"].nunique() if "venue" in articles_df else 0
     n_authors = _unique_list_values(articles_df, "authors")
     n_keywords = _unique_list_values(articles_df, "keywords")

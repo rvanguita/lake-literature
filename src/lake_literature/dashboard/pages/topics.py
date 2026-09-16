@@ -111,35 +111,22 @@ def _top_keywords(articles_df: pd.DataFrame) -> None:
         grouped["ieee"] = 0
         grouped["elsevier"] = 0
 
-    grouped = grouped.sort_values("total").reset_index()
-
-    # Cor única para cada palavra-chave da paleta qualitativa
-    palette = px.colors.qualitative.Dark24
-    color_map = {kw: palette[i % len(palette)] for i, kw in enumerate(grouped["keyword"])}
-
-    fig = px.bar(
-        grouped,
-        x="total",
-        y="keyword",
-        orientation="h",
-        title="Top 20 palavras-chave (cores individuais e divisão por base)",
-        color="keyword",
-        color_discrete_map=color_map,
-        custom_data=["total", "ieee", "elsevier"],
+    fig = topn_hbar(
+        grouped["total"], x_title="Quantidade de artigos", title="Top 20 palavras-chave"
     )
-    fig.update_traces(
-        hovertemplate=(
+    for trace in fig.data:
+        breakdown = grouped.loc[list(trace.y), ["ieee", "elsevier"]].to_numpy()
+        trace.customdata = breakdown
+        trace.hovertemplate = (
             "<b>%{y}</b><br>"
-            "Total de artigos: %{customdata[0]:,}<br>"
-            "• Artigos IEEE: %{customdata[1]:,}<br>"
-            "• Artigos Elsevier: %{customdata[2]:,}<extra></extra>"
-        ),
-    )
-    fig.update_layout(yaxis_title="", xaxis_title="Quantidade de artigos", showlegend=False)
+            "Total de artigos: %{x:,}<br>"
+            "• Artigos IEEE: %{customdata[0]:,}<br>"
+            "• Artigos Elsevier: %{customdata[1]:,}<extra></extra>"
+        )
     render_chart(
         fig,
-        caption="Tópicos mais recorrentes no corpus com cores individuais para cada termo. Passe o mouse "
-        "sobre as barras para conferir a divisão exata entre IEEE e Elsevier.",
+        caption="Tópicos mais recorrentes no corpus. Passe o mouse sobre as barras para conferir a divisão "
+        "exata entre IEEE e Elsevier.",
     )
 
 
