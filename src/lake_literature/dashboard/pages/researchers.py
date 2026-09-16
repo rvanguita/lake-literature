@@ -14,12 +14,17 @@ from lake_literature.dashboard.analytics import (
     RECENT_WINDOW_YEARS,
     author_count_series,
     author_display_name,
+    author_productivity_trend,
+    author_year_matrix,
     canonical_author,
     explode_authors,
     explode_keywords,
+    gini_coefficient,
+    lorenz_curve,
+    output_impact_correlation,
     valid_years,
 )
-from lake_literature.dashboard.charts import topn_hbar
+from lake_literature.dashboard.charts import lorenz_chart, topn_hbar
 from lake_literature.dashboard.components import (
     article_table,
     hero_banner,
@@ -47,6 +52,13 @@ def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     display_names = exploded.groupby("author_key")["author"].apply(author_display_name)
     exploded["author_display"] = exploded["author_key"].map(display_names)
     return exploded
+
+
+@st.cache_data(
+    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
+)
+def _author_year_matrix_cached(articles_df: pd.DataFrame) -> pd.DataFrame:
+    return author_year_matrix(articles_df)
 
 
 def render() -> None:
@@ -94,8 +106,8 @@ def render() -> None:
     )
 
     st.divider()
-    tab_ranking, tab_production, tab_collab, tab_explore = st.tabs(
-        ["🏅 Ranking", "🗓️ Produção", "🕸️ Colaboração", "🔎 Exploração"]
+    tab_ranking, tab_production, tab_collab, tab_explore, tab_stats = st.tabs(
+        ["🏅 Ranking", "🗓️ Produção", "🕸️ Colaboração", "🔎 Exploração", "📐 Tabela & Estatísticas"]
     )
 
     with tab_ranking:
@@ -105,8 +117,6 @@ def render() -> None:
         _production_heatmap(author_rows)
         st.divider()
         _emerging_vs_established(author_rows)
-        st.divider()
-        _volume_vs_impact(author_rows)
 
     with tab_collab:
         _coauthorship_network(author_rows)
@@ -115,6 +125,15 @@ def render() -> None:
         _research_line_leaders(author_rows, articles_df)
         st.divider()
         _author_keyword_profile(author_rows, articles_df)
+
+    with tab_stats:
+        matrix = _full_output_table(articles_df)
+        st.divider()
+        _concentration_analysis(matrix)
+        st.divider()
+        _productivity_trend(matrix)
+        st.divider()
+        _volume_vs_impact(author_rows)
 
 
 def _top_authors(author_rows: pd.DataFrame) -> None:
@@ -223,16 +242,24 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
     if "citation_count" not in author_rows.columns:
         st.info("Coluna 'citation_count' não disponível nesta camada.")
         return
+    stats = output_impact_correlation(author_rows, "citation_count")
     by_author = author_rows.groupby("author_display").agg(
         articles=("author_display", "size"),
         mean_citations=("citation_count", "mean"),
         total_citations=("citation_count", "sum"),
     )
     by_author = by_author[by_author["articles"] >= 2].dropna(subset=["mean_citations"])
-    if by_author.empty:
+    if by_author.empty or stats["pearson"] is None:
         st.info("Sem dados de citação suficientes para autores com ≥2 artigos.")
         return
 
+    metric_row(
+        [
+            ("Correlação de Pearson", f"{stats['pearson']:.2f}", None),
+            ("Correlação de Spearman", f"{stats['spearman']:.2f}", None),
+            ("Autores considerados", f"{stats['n']:,}", None),
+        ]
+    )
     fig = px.scatter(
         by_author.reset_index(),
         x="articles",
@@ -241,14 +268,99 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
         color="mean_citations",
         color_continuous_scale=["#4a3aa7", "#eda100", "#1baf7a"],
         hover_name="author_display",
+        title=f"Volume × impacto (Pearson r = {stats['pearson']:.2f})",
         labels={"articles": "Artigos no corpus", "mean_citations": "Citações médias por artigo"},
     )
     fig.update_layout(coloraxis_showscale=False)
     render_chart(
         fig,
         caption="`citation_count` nulo é tratado como 'não coletado' e excluído da média — não como zero. "
-        "O tamanho da bolha é o total de citações acumuladas pelo autor.",
+        "O tamanho da bolha é o total de citações acumuladas pelo autor. A correlação de Spearman é "
+        "incluída por ser mais robusta a distribuições de cauda longa (poucos autores com produção ou "
+        "citações muito acima da média), comuns em dados bibliométricos.",
     )
+
+
+def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
+    st.subheader("📋 Produção completa por autor e ano")
+    matrix = _author_year_matrix_cached(articles_df)
+    if matrix.empty:
+        st.info("Sem anos válidos para montar a tabela.")
+        return matrix
+
+    st.caption(
+        "Uma linha por autor canonicalizado (ver aviso no topo da página), uma coluna por ano de "
+        "publicação válido, mais o total histórico. Contagem por DOI distinto quando disponível, "
+        "para não contar duas vezes um artigo em coautoria assinado pelo mesmo autor. "
+        "**Ordenado do maior para o menor total.**"
+    )
+    st.dataframe(matrix, hide_index=True, width="stretch")
+    st.download_button(
+        "⬇️ Baixar tabela completa (CSV)",
+        data=matrix.to_csv(index=False).encode("utf-8"),
+        file_name="producao_por_autor_ano.csv",
+        mime="text/csv",
+        key="dl_author_year_matrix",
+    )
+    return matrix
+
+
+def _concentration_analysis(matrix: pd.DataFrame) -> None:
+    st.subheader("📐 Concentração da produção (Gini / curva de Lorenz)")
+    if matrix.empty:
+        st.info("Sem dados suficientes para esta análise.")
+        return
+
+    gini = gini_coefficient(matrix["total"])
+    if gini < 0.3:
+        interpretation = (
+            "baixa concentração — a produção é relativamente distribuída entre os autores"
+        )
+    elif gini > 0.6:
+        interpretation = (
+            "alta concentração — a produção está dominada por poucos autores muito prolíficos"
+        )
+    else:
+        interpretation = "concentração moderada"
+    metric_row([("📐 Índice de Gini", f"{gini:.2f}", interpretation)])
+
+    lorenz_df = lorenz_curve(matrix["total"])
+    fig = lorenz_chart(lorenz_df)
+    render_chart(
+        fig,
+        caption="Índice de Gini calculado sobre o total histórico por autor (0 = todos publicam o "
+        "mesmo tanto, 1 = um único autor concentra toda a produção). Quanto mais a curva observada se "
+        "afasta da diagonal de equidade perfeita, mais concentrada é a produção do corpus.",
+    )
+
+
+def _productivity_trend(matrix: pd.DataFrame) -> None:
+    st.subheader("📈 Tendência de produtividade — top autores")
+    if matrix.empty:
+        st.info("Sem dados suficientes para esta análise.")
+        return
+
+    trend_df = author_productivity_trend(matrix, top_n=TOP_AUTHORS)
+    st.caption(
+        f"Reta de tendência (mínimos quadrados, `numpy.polyfit` grau 1) de artigos por ano para cada "
+        f"um dos {TOP_AUTHORS} autores mais prolíficos, usando somente os anos em que o autor "
+        "publicou. Classificado como 'crescendo'/'caindo' quando a inclinação ultrapassa ±0,15 "
+        "artigo/ano; dentro dessa faixa é 'estável'. Séries deste tamanho (poucos anos ativos) não "
+        "sustentam um teste de significância estatística confiável — é um indicador direcional, não "
+        "uma previsão."
+    )
+    display = trend_df.rename(
+        columns={
+            "author": "Autor",
+            "total": "Total histórico",
+            "first_year": "Primeiro ano",
+            "last_year": "Último ano",
+            "active_years": "Anos ativos",
+            "slope": "Inclinação (artigos/ano)",
+            "trend": "Tendência",
+        }
+    )
+    st.dataframe(display, hide_index=True, width="stretch")
 
 
 def _coauthorship_network(author_rows: pd.DataFrame) -> None:

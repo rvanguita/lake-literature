@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) cd \"${CLAUDE_PROJECT_DIR:-.}\" && uv run ruff check --fix \"$f\" 2>&1; uv run ruff format \"$f\" 2>&1;; esac; true",
+            "statusMessage": "ruff check --fix + format",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *src/lake_literature/ingest/*|*src/lake_literature/transform/*|*tests/*) cd \"${CLAUDE_PROJECT_DIR:-.}\" && uv run pytest -q;; esac; true",
+            "statusMessage": "uv run pytest -q",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */config.csv) exit 0;; */data/articles/*|*/data/ieee/*|*/data/sciencedirect.zip|*/data/enrichment_cache.json) echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"data/ is read-only, manually-collected corpus input (see CLAUDE.md) - this path is binary/regenerable and not meant to be edited by Claude. config.csv files remain editable.\"}}';; esac",
+            "statusMessage": "checking data/ read-only guard"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); blocked=0; echo \"$cmd\" | grep -qE '\\brm\\b' && echo \"$cmd\" | grep -qE -- '-[a-zA-Z]*[rf][a-zA-Z]*[rf][a-zA-Z]*(\\s|$)' && echo \"$cmd\" | grep -qE '\\bdata\\b' && blocked=1; echo \"$cmd\" | grep -qE '\\bgit\\s+push\\b' && echo \"$cmd\" | grep -qE -- '--force($|[^-])' && blocked=1; echo \"$cmd\" | grep -qE '\\bgit\\s+reset\\s+--hard\\b' && blocked=1; if [ \"$blocked\" = \"1\" ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Blocked destructive command pattern (rm -rf data, git push --force, or git reset --hard). This project treats data/ as irreplaceable manual input and main as a protected branch.\"}}'; fi",
+            "statusMessage": "checking for destructive command patterns"
+          }
+        ]
+      }
+    ]
+  }
+}
