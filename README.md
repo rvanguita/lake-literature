@@ -1,9 +1,10 @@
 # lake-literature
 
-`lake-literature` turns bibliographic exports on **"distribution system planning"** (electric power
-distribution networks) — collected by hand from IEEE Xplore and Elsevier/ScienceDirect — into a clean,
-deduplicated, queryable corpus, with the eventual goal of a RAG-ready dataset that helps decide which papers
-to cite when writing a new article on the topic.
+Writing a new article on **"distribution system planning"** (electric power distribution networks) means
+knowing, out of several hundred candidate papers scattered across publisher databases, which ones are
+actually worth citing. `lake-literature` turns hand-assembled bibliographic exports from IEEE Xplore and
+Elsevier/ScienceDirect into a clean, deduplicated, RAG-ready corpus that answers that question — without
+anyone having to query MySQL directly.
 
 For the full product rationale see [`docs/PRD.md`](docs/PRD.md); for the system design see
 [`docs/SDD.md`](docs/SDD.md); for the exact quirks of the source data (BibTeX parsing gotchas, DOI format
@@ -11,52 +12,19 @@ differences, lossy PDF filename matching) see [`CLAUDE.md`](CLAUDE.md).
 
 ![Pipeline architecture: IEEE Xplore and Elsevier/ScienceDirect flowing through the raw, bronze, silver, gold and embed layers, orchestrated by Apache Airflow, feeding the Streamlit dashboard](docs/images/architecture.svg)
 
-## What it does
+## Why this exists
 
-Two publisher exports are consolidated through a **medallion architecture** — five stages, four of them each
-backed by their own MySQL database and built with SQLAlchemy:
+Doing this by hand from raw publisher exports is unmanageable:
 
-```
-raw       verbatim ingestion of every source file (CSV rows, BibTeX entries, PDF inventory)
-   ↓
-bronze    IEEE (CSV + .bib) and Elsevier (.bib) unioned into one common article schema
-   ↓
-silver    deduplicated by normalized DOI, quality-flagged, linked to PDFs by fuzzy title match
-   ↓
-gold      curated articles + RAG-ready text chunks (abstract chunks for everything, full-text
-          chunks for the subset with a linked PDF)
-   ↓
-embed     fills gold.lit_chunks.embedding for every chunk, entirely locally via fastembed (ONNX
-          runtime, BAAI/bge-small-en-v1.5) — no API key, no GPU required
-```
-
-DOI is the only reliable cross-source identifier: stripping the `https://doi.org/` prefix and casefolding it
-is what makes deduplication possible, because the two sources otherwise disagree on entry format, field names,
-and separators.
-
-A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every stage:
-
-| Page | What it shows |
-|---|---|
-| Overview | headline corpus counts and composition |
-| Output Over Time | publication trends by year, IEEE vs. Elsevier |
-| Topics & Venues | keyword statistics with an interactive filter/explorer, venue breakdown |
-| Highlights & Impact | citation distribution, most-cited/most-relevant articles |
-| Researchers | author-level stats and collaboration view |
-| Trends & Forecast | forecasting of publication/topic trends |
-| Layers & Pipeline | per-layer record counts and pipeline run status, with buttons to trigger a stage |
-| Quality & RAG | data-quality flags plus RAG-chunk/embedding-readiness gauge, with a button to run the `embed` stage directly |
-| Search Configuration | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
-
-> Note: the page labels in the running app (`src/lake_literature/dashboard/app.py`) are currently in
-> Portuguese; the table above uses their English meaning.
-
-Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
-(`lake_literature_raw/bronze/silver/gold/embed`, defined in `airflow/dags/lake_literature_dags.py`) plus a
-combined `lake_literature_all` DAG that chains all five. The dashboard's "Camadas & Pipeline" and "Qualidade e
-RAG" pages trigger and poll these DAG runs through Airflow's REST API (`dashboard/airflow_client.py`,
-`dashboard/pipeline_control.py`) instead of running the pipeline in-process, so every run gets proper history,
-logs, and per-task status in the Airflow UI.
+- The two publishers export different formats (CSV+BibTeX vs. BibTeX-only), different field names, different
+  DOI formats, and different pagination conventions.
+- The same paper frequently appears in both exports, and nothing catches that duplication without a reliable
+  join key — DOI, normalized, is that key.
+- Search-hit counts, downloaded-entry counts, and retrieved-PDF counts never match (IEEE alone reports ~304
+  hits vs. ~266 downloaded `.bib` entries vs. ~96 PDFs), so the corpus is inherently partial — a fact the
+  pipeline has to represent, not paper over.
+- There was no single place to see corpus composition, quality, and coverage at a glance, or to know which
+  papers have full text available for deeper analysis.
 
 ## Data sources
 
@@ -68,6 +36,46 @@ logs, and per-task status in the Airflow UI.
 The corpus (`data/`) is not checked into git — it's raw publisher output assembled manually, treated as
 read-only input by the pipeline. See [`CLAUDE.md`](CLAUDE.md) for the parsing gotchas specific to each source
 (BibTeX entries with no separator between them, lossy PDF-to-title matching, DOI format differences, etc.).
+
+## Dashboard
+
+A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every pipeline stage,
+across nine pages:
+
+| Page | What it shows |
+|---|---|
+| Overview | headline corpus counts, source distribution, publication-year spread, bibliometric correlations, editorial concentration |
+| Output Over Time | volume by year and by CAPES/Qualis tier, cumulative growth by periódico, IEEE vs. Elsevier comparison, author-team-size trends |
+| Topics & Venues | periódico ranking, CAPES/Qualis classification, keyword statistics with an interactive filter/explorer, keyword-share evolution |
+| Highlights & Impact | reference-count distribution, citation impact, collaboration, author/venue rankings |
+| Researchers | canonicalized author ranking, production over time, co-authorship network, per-topic research-line leaders, concentration/Gini analysis |
+| Trends & Forecast | regression-based forecasts of publication volume (per source) and of keyword-level growth |
+| Layers & Pipeline | funnel + per-layer record counts and drift checks, with buttons to trigger a pipeline stage |
+| Quality & RAG | metadata richness, full-text coverage, chunk/embedding readiness, with a button to run the `embed` stage directly |
+| Search Configuration | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
+
+Every page's charts are organized into tabs — several with a further layer of sub-tabs — so each page stays
+one screen instead of an endless scroll. Page labels in the running app are in Portuguese; the table above
+uses their English meaning.
+
+Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
+(`lake_literature_raw/bronze/silver/gold/embed`, defined in `airflow/dags/lake_literature_dags.py`) plus a
+combined `lake_literature_all` DAG that chains all five. The "Camadas & Pipeline" and "Qualidade e RAG"
+dashboard pages trigger and poll these DAG runs through Airflow's REST API
+(`dashboard/airflow_client.py`, `dashboard/pipeline_control.py`) instead of running the pipeline in-process,
+so every run gets proper history, logs, and per-task status in the Airflow UI.
+
+## Storage
+
+The two publisher exports are consolidated through a **medallion architecture** — raw → bronze → silver →
+gold → embed — with SQLAlchemy models. Each of the four medallion layers (`raw`, `bronze`, `silver`, `gold`)
+lives in its own MySQL database, named plainly after the layer. **Those databases are shared with unrelated
+projects on the same MySQL server** — the pipeline only ever creates or touches its own `lit_`-prefixed
+tables within them, never anything else it finds there.
+
+DOI is the only reliable cross-source identifier: stripping the `https://doi.org/` prefix and casefolding it
+is what makes deduplication possible, because the two sources otherwise disagree on entry format, field
+names, and separators.
 
 ## Quick start
 
@@ -92,6 +100,18 @@ This starts two services: `airflow` (a single-container `airflow standalone` ins
 `http://localhost:8080`, DAGs pre-loaded from `airflow/dags/`) and `dashboard` (Streamlit at
 `http://localhost:8501`, wired to trigger those DAGs). Both read MySQL connection settings from `.env`, which
 neither service bakes into its image.
+
+## Testing & linting
+
+```bash
+uv run pytest        # tests/ — pure transform logic + bronze/silver/gold builders against in-memory SQLite
+uv run ruff check     # lint (E, F, I, UP, B rulesets; see pyproject.toml)
+```
+
+The suite (`tests/`) covers DOI normalization, bronze/silver dedup and merge logic, PDF fuzzy-matching, gold
+chunking, CAPES/Qualis venue matching, author-analytics helpers, and vector-similarity ranking — all against
+in-memory SQLite, so none of it needs a live MySQL server. It does not cover Airflow DAGs, the Streamlit UI,
+or file parsing against the real (gitignored) `data/` corpus — those stay manually verified.
 
 ## Git hooks
 
@@ -136,17 +156,22 @@ src/lake_literature/
 airflow/dags/            DAG definitions (thin wrappers around `uv run lake-literature --stage X`)
 docs/                     PRD.md, SDD.md, images/architecture.svg
 scripts/git-hooks/        local pre-commit hook scripts
+tests/                    pytest suite (in-memory SQLite, no MySQL needed)
 main.py                  root Streamlit entry point (`import lake_literature.dashboard.app`)
 ```
 
 ## Status
 
-`gold.lit_chunks.embedding` is populated by the `embed` stage (`transform/embeddings.py`, `BAAI/bge-small-en-v1.5`
-via `fastembed`) and is idempotent — re-running it only embeds chunks still missing a vector, so it's safe to
-call after every `--stage gold` run. The dashboard's "Qualidade e RAG" page has a gauge showing embedding
-coverage and a button to trigger the stage directly. That same page's search box now runs real vector
-similarity search (`dashboard/search.py`, cosine similarity via scikit-learn over `chunks.embedding`) once
-embeddings exist, falling back to keyword matching only before the `embed` stage has run.
-
-A pytest suite lives under `tests/` (`uv run pytest`), covering the pure transform logic and the
-bronze→silver dedup/PDF-linking flow against in-memory SQLite. There is no linter/formatter configured yet.
+- **No duplicate DOIs** in `silver`/`gold`'s `lit_articles` after a full pipeline run over the current corpus.
+- **Idempotent re-runs**: running `--stage all` twice in a row on unchanged `data/` doesn't change row counts.
+- **Embedding coverage**: `gold.lit_chunks.embedding` is filled by the `embed` stage
+  (`transform/embeddings.py`, `BAAI/bge-small-en-v1.5` via `fastembed`, entirely local) and is idempotent —
+  re-running only embeds chunks still missing a vector. The "Qualidade e RAG" dashboard page has a gauge for
+  this and a button to trigger the stage directly.
+- **Retrieval**: implemented as in-process cosine similarity over `gold.lit_chunks.embedding`
+  (`dashboard/search.py`, scikit-learn) — not a persisted vector index. Acceptable at the corpus's current
+  size (a few thousand chunks); a real vector store (pgvector, FAISS) would be the next step at an order of
+  magnitude more data. Falls back to keyword matching before the `embed` stage has run.
+- **Corpus refresh remains manual**: adding new export files to `data/` and re-running the pipeline is a
+  deliberate, unautomated step — there is no scheduled or triggered re-scrape (see PRD §3 for the full list
+  of non-goals).
