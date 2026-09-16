@@ -109,14 +109,16 @@ def layer_funnel() -> pd.DataFrame:
         silver_df = by_layer.get("silver", pd.DataFrame())
         gold_df = by_layer.get("gold", pd.DataFrame())
 
-        bronze_n = int((bronze_df["source"] == source).sum()) if "source" in bronze_df.columns else 0
+        bronze_n = (
+            int((bronze_df["source"] == source).sum()) if "source" in bronze_df.columns else 0
+        )
         silver_n = (
-            int(silver_df["sources"].apply(lambda s: source in s).sum())
+            int(silver_df["sources"].apply(lambda s, source=source: source in s).sum())
             if "sources" in silver_df.columns
             else 0
         )
         gold_n = (
-            int(gold_df["sources"].apply(lambda s: source in s).sum())
+            int(gold_df["sources"].apply(lambda s, source=source: source in s).sum())
             if "sources" in gold_df.columns
             else 0
         )
@@ -174,9 +176,7 @@ def filter_articles(
         if isinstance(year_range, (int, float)):
             year_range = (int(year_range), int(year_range))
         years = pd.to_numeric(filtered["year"], errors="coerce")
-        filtered = filtered.loc[
-            years.ge(year_range[0]) & years.le(year_range[1])
-        ]
+        filtered = filtered.loc[years.ge(year_range[0]) & years.le(year_range[1])]
     if sources and "source" in filtered.columns:
         filtered = filtered[filtered["source"].isin(sources)]
     if venues and "venue" in filtered.columns:

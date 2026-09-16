@@ -16,6 +16,11 @@ import pandas as pd
 
 OTHERS_LABEL = "Outros"
 
+# Shared "recent activity" window used by both the Visão Geral and
+# Pesquisadores pages, so "recent" means the same thing (last 5 publication
+# years, inclusive of the latest) everywhere it's shown.
+RECENT_WINDOW_YEARS = 5
+
 
 def valid_years(df: pd.DataFrame, lo: int = 1950, hi: int = 2026) -> pd.Series:
     """Coerce `year` to numeric and drop rows outside a plausible window.
@@ -42,9 +47,7 @@ def source_counts_by(df: pd.DataFrame, index_col: str) -> pd.DataFrame:
 
     has_source = "source" in df.columns
     if has_source:
-        pivot = (
-            df.groupby([index_col, "source"]).size().unstack(fill_value=0)
-        )
+        pivot = df.groupby([index_col, "source"]).size().unstack(fill_value=0)
         for src in ("ieee", "elsevier"):
             if src not in pivot.columns:
                 pivot[src] = 0
@@ -94,9 +97,7 @@ def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total")
         working["venue"].isin(top_venues), OTHERS_LABEL
     )
 
-    by_year_venue = (
-        working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
-    )
+    by_year_venue = working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
     years = sorted(by_year_venue["year"].unique())
     venues = list(by_year_venue["venue_bucket"].unique())
     full_index = pd.MultiIndex.from_product([years, venues], names=["year", "venue_bucket"])
@@ -129,6 +130,22 @@ def source_means(df: pd.DataFrame, col: str) -> dict[str, float | None]:
     return result
 
 
+def author_count_series(df: pd.DataFrame) -> pd.Series:
+    """Authors per row, from the `authors` list column.
+
+    A list counts by its length; a non-null non-list scalar (a defensive
+    fallback for a stray single-author value that never got wrapped in a
+    list) counts as 1; null counts as 0. Shared by every page that needs an
+    "authors per article" distribution or mean, so this edge case is handled
+    the same way everywhere instead of drifting between pages.
+    """
+    if "authors" not in df.columns:
+        return pd.Series(0, index=df.index, dtype="int64")
+    return df["authors"].apply(
+        lambda a: len(a) if isinstance(a, list) else (1 if pd.notna(a) else 0)
+    )
+
+
 def explode_authors(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (article, author), keeping year/source/citation_count/venue."""
     if df.empty or "authors" not in df.columns:
@@ -147,7 +164,9 @@ def explode_keywords(df: pd.DataFrame) -> pd.DataFrame:
     keep = [c for c in ("year", "source", "venue", "doi") if c in df.columns]
     working = df[["keywords", *keep]].copy()
     working = working.explode("keywords").rename(columns={"keywords": "keyword"})
-    working = working[working["keyword"].notna() & (working["keyword"].astype(str).str.strip() != "")]
+    working = working[
+        working["keyword"].notna() & (working["keyword"].astype(str).str.strip() != "")
+    ]
     working["keyword"] = working["keyword"].astype(str).str.strip().str.lower()
     return working.reset_index(drop=True)
 
@@ -208,7 +227,9 @@ LAYER_ORDER = ("raw", "bronze", "silver", "gold")
 LAYER_LABELS = {"raw": "Raw", "bronze": "Bronze", "silver": "Silver", "gold": "Gold"}
 
 
-def layer_source_counts(bronze_df: pd.DataFrame, silver_df: pd.DataFrame, gold_df: pd.DataFrame) -> pd.DataFrame:
+def layer_source_counts(
+    bronze_df: pd.DataFrame, silver_df: pd.DataFrame, gold_df: pd.DataFrame
+) -> pd.DataFrame:
     """IEEE / Elsevier / total article counts for bronze, silver, and gold.
 
     Bronze has a scalar `source`; silver/gold only carry a `sources` list --

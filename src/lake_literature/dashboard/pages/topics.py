@@ -10,7 +10,13 @@ import streamlit as st
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import explode_keywords, valid_years
 from lake_literature.dashboard.charts import stacked_area, topn_hbar
-from lake_literature.dashboard.components import article_table, metric_row, page_header, render_chart, require_columns
+from lake_literature.dashboard.components import (
+    article_table,
+    metric_row,
+    page_header,
+    render_chart,
+    require_columns,
+)
 from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, TREND_DOWN_COLOR, TREND_UP_COLOR
 
 TOP_KEYWORDS_TREND = 12
@@ -105,35 +111,22 @@ def _top_keywords(articles_df: pd.DataFrame) -> None:
         grouped["ieee"] = 0
         grouped["elsevier"] = 0
 
-    grouped = grouped.sort_values("total").reset_index()
-
-    # Cor única para cada palavra-chave da paleta qualitativa
-    palette = px.colors.qualitative.Dark24
-    color_map = {kw: palette[i % len(palette)] for i, kw in enumerate(grouped["keyword"])}
-
-    fig = px.bar(
-        grouped,
-        x="total",
-        y="keyword",
-        orientation="h",
-        title="Top 20 palavras-chave (cores individuais e divisão por base)",
-        color="keyword",
-        color_discrete_map=color_map,
-        custom_data=["total", "ieee", "elsevier"],
+    fig = topn_hbar(
+        grouped["total"], x_title="Quantidade de artigos", title="Top 20 palavras-chave"
     )
-    fig.update_traces(
-        hovertemplate=(
+    for trace in fig.data:
+        breakdown = grouped.loc[list(trace.y), ["ieee", "elsevier"]].to_numpy()
+        trace.customdata = breakdown
+        trace.hovertemplate = (
             "<b>%{y}</b><br>"
-            "Total de artigos: %{customdata[0]:,}<br>"
-            "• Artigos IEEE: %{customdata[1]:,}<br>"
-            "• Artigos Elsevier: %{customdata[2]:,}<extra></extra>"
-        ),
-    )
-    fig.update_layout(yaxis_title="", xaxis_title="Quantidade de artigos", showlegend=False)
+            "Total de artigos: %{x:,}<br>"
+            "• Artigos IEEE: %{customdata[0]:,}<br>"
+            "• Artigos Elsevier: %{customdata[1]:,}<extra></extra>"
+        )
     render_chart(
         fig,
-        caption="Tópicos mais recorrentes no corpus com cores individuais para cada termo. Passe o mouse "
-        "sobre as barras para conferir a divisão exata entre IEEE e Elsevier.",
+        caption="Tópicos mais recorrentes no corpus. Passe o mouse sobre as barras para conferir a divisão "
+        "exata entre IEEE e Elsevier.",
     )
 
 
@@ -149,7 +142,9 @@ def _keyword_stats(kw_lists: pd.Series, all_keywords: list[str]) -> None:
     )
 
 
-def _keyword_explorer(articles_df: pd.DataFrame, kw_lists: pd.Series, all_keywords: list[str]) -> None:
+def _keyword_explorer(
+    articles_df: pd.DataFrame, kw_lists: pd.Series, all_keywords: list[str]
+) -> None:
     st.subheader("🔎 Explorador: filtrar artigos por palavra-chave")
     selected = st.multiselect(
         "Selecione um ou mais termos (serão exibidos artigos que contenham qualquer um deles):",
@@ -183,7 +178,9 @@ def _keyword_trends(articles_df: pd.DataFrame) -> None:
     kw_year["year"] = valid_years(kw_year, lo=TREND_MIN_YEAR, hi=2026)
     kw_year = kw_year.dropna(subset=["year"]).astype({"year": int})
     if len(kw_year) < 30:
-        st.info(f"Dados insuficientes a partir de {TREND_MIN_YEAR} para analisar tendências temporais.")
+        st.info(
+            f"Dados insuficientes a partir de {TREND_MIN_YEAR} para analisar tendências temporais."
+        )
         return
 
     col_share, col_slope = st.columns(2)
@@ -204,7 +201,9 @@ def _topic_share_area(kw_year: pd.DataFrame) -> None:
     scoped = kw_year[kw_year["keyword"].isin(top_terms)]
     by_year_kw = scoped.groupby(["year", "keyword"]).size().reset_index(name="count")
 
-    color_map = {kw: CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i, kw in enumerate(top_terms)}
+    color_map = {
+        kw: CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i, kw in enumerate(top_terms)
+    }
     fig = stacked_area(
         by_year_kw,
         x="year",
@@ -244,7 +243,9 @@ def _rising_falling(kw_year: pd.DataFrame) -> None:
         slopes[kw] = slope
 
     if not slopes:
-        st.info(f"Nenhum termo com pelo menos {MIN_KEYWORD_OCCURRENCES} ocorrências para calcular tendência.")
+        st.info(
+            f"Nenhum termo com pelo menos {MIN_KEYWORD_OCCURRENCES} ocorrências para calcular tendência."
+        )
         return
 
     slope_series = pd.Series(slopes).sort_values()
@@ -261,7 +262,11 @@ def _rising_falling(kw_year: pd.DataFrame) -> None:
         color="direction",
         color_discrete_map={"Em Alta": TREND_UP_COLOR, "Em Queda": TREND_DOWN_COLOR},
         title="Inclinação da participação anual (regressão linear)",
-        labels={"slope": "Variação anual na participação (p.p./ano)", "keyword": "", "direction": "Tendência"},
+        labels={
+            "slope": "Variação anual na participação (p.p./ano)",
+            "keyword": "",
+            "direction": "Tendência",
+        },
     )
     fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:+.2f} p.p./ano<extra></extra>")
     fig.update_layout(legend_title_text="Tendência")
@@ -296,7 +301,10 @@ def _first_appearance(kw_year: pd.DataFrame) -> None:
         hover_name="keyword",
         color="first_year",
         color_continuous_scale=["#4a3aa7", "#eda100", "#1baf7a"],
-        labels={"first_year": "Ano da primeira menção no corpus", "count": "Menções totais no período"},
+        labels={
+            "first_year": "Ano da primeira menção no corpus",
+            "count": "Menções totais no período",
+        },
     )
     fig.update_traces(
         marker=dict(size=10, line=dict(width=1, color="rgba(255,255,255,0.4)")),
@@ -304,9 +312,9 @@ def _first_appearance(kw_year: pd.DataFrame) -> None:
     )
     fig.update_layout(coloraxis_showscale=False)
 
-    highlight = pd.concat(
-        [df.nlargest(4, "count"), df.nlargest(4, "first_year")]
-    ).drop_duplicates(subset="keyword")
+    highlight = pd.concat([df.nlargest(4, "count"), df.nlargest(4, "first_year")]).drop_duplicates(
+        subset="keyword"
+    )
     for idx, (_, row) in enumerate(highlight.iterrows()):
         fig.add_annotation(
             x=row["first_year"],

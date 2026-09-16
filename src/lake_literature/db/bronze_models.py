@@ -44,8 +44,6 @@ class Article(Base):
     raw_bib_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_csv_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow
-    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("source", "source_id", name="uq_source_record"),)

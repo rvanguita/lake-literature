@@ -33,9 +33,7 @@ def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None
     """
     total_chunks = gold_session.query(Chunk).count()
 
-    pending_ids = gold_session.scalars(
-        select(Chunk.id).where(Chunk.embedding.is_(None))
-    ).all()
+    pending_ids = gold_session.scalars(select(Chunk.id).where(Chunk.embedding.is_(None))).all()
     already_embedded = total_chunks - len(pending_ids)
 
     if not pending_ids:
@@ -59,7 +57,7 @@ def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None
         texts = [c.text for c in ordered_chunks]
 
         vectors = model.embed(texts)
-        for chunk, vector in zip(ordered_chunks, vectors):
+        for chunk, vector in zip(ordered_chunks, vectors, strict=True):
             chunk.embedding = vector.tolist()
             chunk.embed_model = EMBED_MODEL_NAME
         gold_session.commit()
@@ -68,4 +66,8 @@ def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None
         if on_progress:
             on_progress(embedded, total_pending)
 
-    return {"embedded": embedded, "already_embedded": already_embedded, "total_chunks": total_chunks}
+    return {
+        "embedded": embedded,
+        "already_embedded": already_embedded,
+        "total_chunks": total_chunks,
+    }

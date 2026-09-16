@@ -44,7 +44,9 @@ def test_merge_group_single_record_is_not_a_duplicate_merge():
 
 def test_merge_group_prefers_longest_abstract_and_flags_duplicate():
     ieee_record = _bronze(source="ieee", abstract="short")
-    elsevier_record = _bronze(source="elsevier", abstract="a much longer abstract with more content")
+    elsevier_record = _bronze(
+        source="elsevier", abstract="a much longer abstract with more content"
+    )
     merged = _merge_group("10.1109/example.1", [ieee_record, elsevier_record])
 
     assert merged["sources"] == ["elsevier", "ieee"]  # sorted

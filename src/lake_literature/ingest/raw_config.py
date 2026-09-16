@@ -9,7 +9,6 @@ full raw text too, so nothing is lost if the extraction misses something.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session

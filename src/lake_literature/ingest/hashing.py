@@ -36,9 +36,7 @@ def record_source_file(
     sha = sha256_file(path)
     stat = path.stat()
     stored_path = relative_path(path)
-    existing = session.scalar(
-        select(SourceFile).where(SourceFile.path == stored_path)
-    )
+    existing = session.scalar(select(SourceFile).where(SourceFile.path == stored_path))
     if existing is None:
         row = SourceFile(
             path=stored_path,

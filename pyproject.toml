@@ -1,7 +1,7 @@
 [project]
 name = "lake-literature"
 version = "0.1.0"
-description = "Add your description here"
+description = "Medallion pipeline turning IEEE Xplore and Elsevier/ScienceDirect bibliographic exports into a deduplicated, RAG-ready literature corpus"
 readme = "README.md"
 authors = [
     { name = "Rene", email = "renevajr@gmail.com" }
@@ -33,4 +33,18 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.14.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# Dashboard pages carry long human-readable Portuguese UI strings/captions;
+# enforcing a hard wrap on those hurts readability more than it helps.
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
