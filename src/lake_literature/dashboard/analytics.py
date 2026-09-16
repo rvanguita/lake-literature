@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 
 OTHERS_LABEL = "Outros"
@@ -221,6 +222,194 @@ def author_display_name(names: pd.Series) -> str:
     if names.empty:
         return ""
     return max(names.unique(), key=len)
+
+
+def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per canonical author, one column per valid year, plus `total`.
+
+    Explodes `authors`, folds names via `canonical_author` (see its docstring
+    for the "initial surname" identity-merge caveat -- any page showing this
+    table must disclose it), and counts distinct articles per author per year
+    via `doi` where available (falls back to row count otherwise, since two
+    exploded rows for the same article/author pair would otherwise double-count
+    a co-authored paper). Sorted descending by `total` per the page's "highest
+    to lowest" requirement. Years outside `valid_years`' plausible window are
+    dropped before pivoting, same as every other year-based aggregation here.
+    """
+    exploded = explode_authors(df)
+    if exploded.empty:
+        return pd.DataFrame(columns=["author", "total"])
+
+    exploded["author_key"] = exploded["author"].apply(canonical_author)
+    exploded = exploded[exploded["author_key"] != ""]
+    exploded["year"] = valid_years(exploded)
+    exploded = exploded.dropna(subset=["year"]).astype({"year": int})
+    if exploded.empty:
+        return pd.DataFrame(columns=["author", "total"])
+
+    display_names = exploded.groupby("author_key")["author"].apply(author_display_name)
+    exploded["author_display"] = exploded["author_key"].map(display_names)
+
+    count_col = "doi" if "doi" in exploded.columns else "author"
+    agg = "nunique" if count_col == "doi" else "size"
+    pivot = (
+        exploded.groupby(["author_display", "year"])[count_col]
+        .agg(agg)
+        .unstack(fill_value=0)
+        .astype(int)
+    )
+    pivot.columns = [str(int(c)) for c in pivot.columns]
+    pivot["total"] = pivot.sum(axis=1)
+    pivot = pivot.sort_values("total", ascending=False)
+    pivot.index.name = "author"
+    year_cols = sorted((c for c in pivot.columns if c != "total"), key=int)
+    return pivot.reset_index()[["author", "total", *year_cols]]
+
+
+def gini_coefficient(values: pd.Series) -> float:
+    """Gini coefficient of a distribution of non-negative values (0..1).
+
+    0 = every author has the same output; close to 1 = output is concentrated
+    in very few authors. Standard mean-absolute-difference formulation, no
+    external stats dependency needed. Returns 0.0 for fewer than 2 authors or
+    an all-zero series (nothing to be unequal about).
+    """
+    arr = pd.to_numeric(pd.Series(values), errors="coerce").dropna().to_numpy(dtype="float64")
+    arr = arr[arr >= 0]
+    n = arr.size
+    if n < 2 or arr.sum() == 0:
+        return 0.0
+    sorted_arr = pd.Series(arr).sort_values().to_numpy()
+    index = pd.Series(range(1, n + 1)).to_numpy(dtype="float64")
+    return float((2 * (index * sorted_arr).sum() / (n * sorted_arr.sum())) - (n + 1) / n)
+
+
+def lorenz_curve(values: pd.Series) -> pd.DataFrame:
+    """Cumulative share of output vs. cumulative share of authors, sorted ascending.
+
+    Includes the (0, 0) origin point. `charts.lorenz_chart` plots this against
+    the perfect-equality diagonal as a second real trace (never a reference
+    line, per the chart contract).
+    """
+    arr = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    arr = arr[arr >= 0].sort_values().to_numpy(dtype="float64")
+    n = arr.size
+    if n == 0 or arr.sum() == 0:
+        return pd.DataFrame({"share_of_authors": [0.0], "share_of_output": [0.0]})
+
+    cum_output = arr.cumsum() / arr.sum()
+    cum_authors = (pd.Series(range(1, n + 1)) / n).to_numpy()
+    return pd.DataFrame(
+        {
+            "share_of_authors": [0.0, *cum_authors.tolist()],
+            "share_of_output": [0.0, *cum_output.tolist()],
+        }
+    )
+
+
+def author_productivity_trend(matrix: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    """Linear-trend classification of yearly output for the top `top_n` authors.
+
+    Fits `count ~ year` with `numpy.polyfit` (degree 1) per author, over that
+    author's own active years only (a career that ended in 2015 shouldn't be
+    scored against years it has no data for). Classifies the slope as
+    "crescendo" / "estável" / "caindo" against a small fixed threshold (0.15
+    articles/year) rather than a significance test -- most authors here have
+    under 15 active years, too short a series for a p-value to be meaningful
+    (the same reasoning `forecasting.py` uses to prefer plain regression over
+    a heavier model). Sorted descending by `total`, matching the main table.
+    """
+    columns = [
+        "author",
+        "total",
+        "first_year",
+        "last_year",
+        "active_years",
+        "slope",
+        "trend",
+    ]
+    if matrix.empty:
+        return pd.DataFrame(columns=columns)
+
+    year_cols = [c for c in matrix.columns if c not in ("author", "total")]
+    top = matrix.sort_values("total", ascending=False).head(top_n)
+
+    rows = []
+    for _, row in top.iterrows():
+        active = [(int(y), row[y]) for y in year_cols if row[y] > 0]
+        if len(active) < 2:
+            first_year = active[0][0] if active else None
+            rows.append(
+                {
+                    "author": row["author"],
+                    "total": int(row["total"]),
+                    "first_year": first_year,
+                    "last_year": first_year,
+                    "active_years": len(active),
+                    "slope": 0.0,
+                    "trend": "dados insuficientes",
+                }
+            )
+            continue
+        years = [y for y, _ in active]
+        counts = [c for _, c in active]
+        slope = float(_linear_slope(years, counts))
+        if slope > 0.15:
+            trend = "crescendo"
+        elif slope < -0.15:
+            trend = "caindo"
+        else:
+            trend = "estável"
+        rows.append(
+            {
+                "author": row["author"],
+                "total": int(row["total"]),
+                "first_year": min(years),
+                "last_year": max(years),
+                "active_years": len(active),
+                "slope": round(slope, 3),
+                "trend": trend,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values("total", ascending=False)
+
+
+def _linear_slope(x: list[int], y: list[int]) -> float:
+    """`numpy.polyfit` degree-1 slope, isolated for testability."""
+    coeffs = np.polyfit(x, y, 1)
+    return float(coeffs[0])
+
+
+def output_impact_correlation(
+    author_rows: pd.DataFrame, impact_col: str = "citation_count"
+) -> dict[str, float | int | None]:
+    """Pearson and Spearman correlation between an author's total output and
+    their mean `impact_col`, plus the sample size actually used.
+
+    Rows with a null `impact_col` are dropped before averaging -- per this
+    corpus's documented data pitfall, null means "not collected", not zero
+    impact, and must not be averaged in as 0. Returns `None`s when fewer than
+    3 authors have usable data (a correlation over 1-2 points is noise).
+    """
+    result: dict[str, float | int | None] = {"pearson": None, "spearman": None, "n": 0}
+    if impact_col not in author_rows.columns or "author_display" not in author_rows.columns:
+        return result
+
+    by_author = author_rows.groupby("author_display").agg(
+        articles=("author_display", "size"), mean_impact=(impact_col, "mean")
+    )
+    by_author = by_author.dropna(subset=["mean_impact"])
+    result["n"] = int(len(by_author))
+    if len(by_author) < 3:
+        return result
+
+    result["pearson"] = float(
+        by_author["articles"].corr(by_author["mean_impact"], method="pearson")
+    )
+    result["spearman"] = float(
+        by_author["articles"].corr(by_author["mean_impact"], method="spearman")
+    )
+    return result
 
 
 LAYER_ORDER = ("raw", "bronze", "silver", "gold")
