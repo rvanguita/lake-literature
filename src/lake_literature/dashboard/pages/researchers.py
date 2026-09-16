@@ -18,7 +18,7 @@ from lake_literature.dashboard.analytics import (
     author_year_matrix,
     canonical_author,
     cumulative_researchers,
-    explode_authors,
+    explode_authors_with_position,
     explode_keywords,
     gini_coefficient,
     lorenz_curve,
@@ -51,8 +51,8 @@ TOP_NETWORK_AUTHORS = 18
     ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
 )
 def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
-    """Explode authors, canonicalize identity, and keep one display name per key."""
-    exploded = explode_authors(articles_df)
+    """Explode authors (with byline position), canonicalize identity, keep one display name per key."""
+    exploded = explode_authors_with_position(articles_df)
     if exploded.empty:
         return exploded
     exploded["author_key"] = exploded["author"].apply(canonical_author)
@@ -120,11 +120,17 @@ def render() -> None:
 
     with tab_ranking:
         _top_authors(author_rows)
+        st.divider()
+        _lead_authors_ranking(author_rows)
 
     with tab_production:
         _researchers_by_year(articles_df)
         st.divider()
         _cumulative_researchers_chart(articles_df)
+        st.divider()
+        _lead_authors_by_year(articles_df)
+        st.divider()
+        _cumulative_lead_authors_chart(articles_df)
         st.divider()
         _production_heatmap(author_rows)
         st.divider()
@@ -173,6 +179,47 @@ def _top_authors(author_rows: pd.DataFrame) -> None:
     render_chart(fig)
 
 
+def _lead_authors_ranking(author_rows: pd.DataFrame) -> None:
+    st.subheader("🥇 Mais frequentes como 1º ou 2º autor")
+    if "position" not in author_rows.columns:
+        st.info("Posição do autor na publicação não disponível nesta camada.")
+        return
+
+    lead_rows = author_rows[author_rows["position"] <= 1]
+    if lead_rows.empty:
+        st.info("Nenhum autor em 1ª/2ª posição identificado nesta camada.")
+        return
+
+    count_col = "doi" if "doi" in lead_rows.columns else "author_display"
+    agg = "nunique" if count_col == "doi" else "size"
+    counts = lead_rows.groupby("author_display")[count_col].agg(agg)
+    top_index = counts.sort_values(ascending=False).head(15).index
+
+    if "source" in lead_rows.columns:
+        scoped = lead_rows[lead_rows["author_display"].isin(top_index)]
+        by_source = (
+            scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in by_source.columns:
+                by_source[src] = 0
+        by_source["total"] = counts.reindex(top_index)
+        by_source = by_source.reindex(top_index).reset_index()
+        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos como 1º/2º autor")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    else:
+        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos como 1º/2º autor")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    render_chart(
+        fig,
+        caption="Contagem combinada de artigos em que o autor aparece na 1ª OU 2ª posição da lista de "
+        "autores, na ordem registrada pela fonte (não é alfabética). Posição na publicação é apenas "
+        "isso -- uma posição; não indica um papel de autoria específico (a convenção sobre o que 1ª/2ª "
+        "posição significa varia por área, e este corpus não registra papéis). Vale o mesmo aviso de "
+        "canonicalização do topo da página.",
+    )
+
+
 def _researchers_by_year(articles_df: pd.DataFrame) -> None:
     st.subheader("👥 Pesquisadores ativos por ano")
     by_year = researchers_by_year(articles_df)
@@ -214,6 +261,50 @@ def _cumulative_researchers_chart(articles_df: pd.DataFrame) -> None:
         f"identificada no corpus (por base, e no geral para o Total). Ao final do período, o corpus "
         f"acumula {int(cum['total'].iloc[-1]):,} pesquisadores distintos "
         f"({int(cum['ieee'].iloc[-1]):,} IEEE, {int(cum['elsevier'].iloc[-1]):,} Elsevier).",
+    )
+
+
+def _lead_authors_by_year(articles_df: pd.DataFrame) -> None:
+    st.subheader("🥇 1º/2º autores ativos por ano")
+    by_year = researchers_by_year(articles_df, max_position=1)
+    if by_year.empty:
+        st.info("Sem anos válidos para este gráfico.")
+        return
+
+    fig = source_bars(by_year, "year", total_line=True)
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Pesquisadores distintos (1º/2º autor)",
+    )
+    render_chart(
+        fig,
+        caption="Autores canonicalizados distintos que apareceram como 1º ou 2º autor em cada ano, "
+        'por base -- não é o mesmo universo do gráfico "Pesquisadores ativos por ano" acima, que '
+        "conta qualquer posição na lista de autores.",
+    )
+
+
+def _cumulative_lead_authors_chart(articles_df: pd.DataFrame) -> None:
+    st.subheader("📈 1º/2º autores acumulados")
+    cum = cumulative_researchers(articles_df, max_position=1)
+    if cum.empty:
+        st.info("Sem anos válidos para o acumulado.")
+        return
+
+    fig = source_lines(
+        cum,
+        "year",
+        title="1º/2º autores distintos acumulados por ano",
+        y_title="Pesquisadores acumulados",
+    )
+    fig.update_layout(xaxis_title="Ano de publicação")
+    render_chart(
+        fig,
+        caption=f"Cada pesquisador é contado uma única vez, no ano da sua primeira aparição como 1º "
+        f"ou 2º autor. Ao final do período, o corpus acumula {int(cum['total'].iloc[-1]):,} "
+        f"pesquisadores distintos nessa condição ({int(cum['ieee'].iloc[-1]):,} IEEE, "
+        f"{int(cum['elsevier'].iloc[-1]):,} Elsevier).",
     )
 
 

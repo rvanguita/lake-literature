@@ -147,15 +147,43 @@ def author_count_series(df: pd.DataFrame) -> pd.Series:
     )
 
 
-def explode_authors(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per (article, author), keeping year/source/citation_count/venue."""
+def explode_authors_with_position(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (article, author), plus the author's 0-based byline position.
+
+    Position 0 is the first-listed author, 1 the second, etc. -- the order the
+    source `.bib`/CSV author field was written in (not alphabetical; see
+    `transform.bronze_articles._split_bibtex_authors`/`_split_ieee_csv_authors`).
+    It's a positional count only, not a claim about authorship role -- what a
+    given position conventionally means varies by field, and this corpus
+    doesn't record roles.
+    """
+    columns = ["author", "position", "year", "source", "venue", "doi"]
     if df.empty or "authors" not in df.columns:
-        return pd.DataFrame(columns=["author", "year", "source", "venue", "doi"])
+        return pd.DataFrame(columns=columns)
     keep = [c for c in ("year", "source", "venue", "doi", "citation_count") if c in df.columns]
     working = df[["authors", *keep]].copy()
-    working = working.explode("authors").rename(columns={"authors": "author"})
+    working["authors"] = working["authors"].apply(
+        lambda lst: list(enumerate(lst)) if isinstance(lst, list) else np.nan
+    )
+    working = working.explode("authors")
+    working = working[working["authors"].apply(lambda v: isinstance(v, tuple))]
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    # `.explode()` repeats the original row index for every exploded entry, so a
+    # positional (not index-aligned) assignment is required here -- joining two
+    # frames that both carry duplicate index labels would cross-join within each
+    # duplicated label instead of pairing rows one-to-one.
+    tuples = working["authors"].tolist()
+    working = working.drop(columns=["authors"])
+    working["position"] = [t[0] for t in tuples]
+    working["author"] = [t[1] for t in tuples]
     working = working[working["author"].notna() & (working["author"].astype(str).str.strip() != "")]
     return working.reset_index(drop=True)
+
+
+def explode_authors(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (article, author), keeping year/source/citation_count/venue."""
+    return explode_authors_with_position(df).drop(columns=["position"])
 
 
 def explode_keywords(df: pd.DataFrame) -> pd.DataFrame:
@@ -290,9 +318,18 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return pivot.reset_index()[["author", *_MATRIX_SUMMARY_COLS, *year_cols]]
 
 
-def _exploded_author_years(df: pd.DataFrame) -> pd.DataFrame:
-    """Shared prep for author-by-year aggregations: explode, canonicalize, valid years only."""
-    exploded = explode_authors(df)
+def _exploded_author_years(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
+    """Shared prep for author-by-year aggregations: explode, canonicalize, valid years only.
+
+    `max_position`, when given, restricts to authors at or before that 0-based
+    byline position (e.g. `max_position=1` keeps only the 1st/2nd author of
+    each article) -- see `explode_authors_with_position`.
+    """
+    exploded = (
+        explode_authors_with_position(df) if max_position is not None else explode_authors(df)
+    )
+    if max_position is not None and not exploded.empty:
+        exploded = exploded[exploded["position"] <= max_position]
     if exploded.empty:
         return exploded
     exploded["author_key"] = exploded["author"].apply(canonical_author)
@@ -301,16 +338,17 @@ def _exploded_author_years(df: pd.DataFrame) -> pd.DataFrame:
     return exploded.dropna(subset=["year"]).astype({"year": int})
 
 
-def researchers_by_year(df: pd.DataFrame) -> pd.DataFrame:
+def researchers_by_year(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
     """Distinct canonical-author count per year, split ieee/elsevier/total.
 
     Unlike `source_counts_by` (which counts rows), `total` here is counted
     independently as the number of distinct authors active that year
     regardless of source -- an author publishing in both IEEE and Elsevier
     the same year must count once in `total`, not twice. `ieee`/`elsevier`
-    default to 0 when a `source` column isn't present.
+    default to 0 when a `source` column isn't present. `max_position` restricts
+    to authors at or before that byline position (see `_exploded_author_years`).
     """
-    exploded = _exploded_author_years(df)
+    exploded = _exploded_author_years(df, max_position=max_position)
     if exploded.empty:
         return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
 
@@ -328,7 +366,7 @@ def researchers_by_year(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def cumulative_researchers(df: pd.DataFrame) -> pd.DataFrame:
+def cumulative_researchers(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
     """Cumulative count of distinct researchers introduced by each year.
 
     Each canonical author is counted once, in the year of their earliest
@@ -338,9 +376,10 @@ def cumulative_researchers(df: pd.DataFrame) -> pd.DataFrame:
     isn't what a cumulative researcher count should mean. As with every other
     ieee/elsevier/total triple here, `total` isn't required to equal
     `ieee + elsevier` -- an author's first IEEE year and first Elsevier year
-    can differ from their first-ever appearance.
+    can differ from their first-ever appearance. `max_position` restricts to
+    authors at or before that byline position (see `_exploded_author_years`).
     """
-    exploded = _exploded_author_years(df)
+    exploded = _exploded_author_years(df, max_position=max_position)
     if exploded.empty:
         return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
 

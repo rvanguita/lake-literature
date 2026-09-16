@@ -4,6 +4,8 @@ from lake_literature.dashboard.analytics import (
     author_productivity_trend,
     author_year_matrix,
     cumulative_researchers,
+    explode_authors,
+    explode_authors_with_position,
     gini_coefficient,
     output_impact_correlation,
     researchers_by_year,
@@ -188,3 +190,52 @@ def test_cumulative_researchers_is_non_decreasing():
     cum = cumulative_researchers(_mixed_source_authors_df())
     for col in ("ieee", "elsevier", "total"):
         assert (cum[col].diff().dropna() >= 0).all()
+
+
+def _multi_author_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "authors": ["A. Silva", "B. Costa", "C. Souza"],
+                "year": 2020,
+                "doi": "c1",
+                "source": "ieee",
+            },
+            {"authors": ["C. Souza"], "year": 2021, "doi": "c2", "source": "elsevier"},
+        ]
+    )
+
+
+def test_explode_authors_with_position_orders_match_byline():
+    exploded = explode_authors_with_position(_multi_author_df())
+    by_doi = exploded[exploded["doi"] == "c1"].sort_values("position")
+    assert list(by_doi["author"]) == ["A. Silva", "B. Costa", "C. Souza"]
+    assert list(by_doi["position"]) == [0, 1, 2]
+
+
+def test_explode_authors_output_unaffected_by_position_tracking():
+    with_position = explode_authors_with_position(_multi_author_df())
+    plain = explode_authors(_multi_author_df())
+    assert "position" not in plain.columns
+    assert list(plain["author"]) == list(with_position["author"])
+    assert len(plain) == len(with_position)
+
+
+def test_researchers_by_year_max_position_excludes_third_author():
+    df = _multi_author_df()
+    all_positions = researchers_by_year(df).set_index("year")
+    lead_only = researchers_by_year(df, max_position=1).set_index("year")
+
+    # 2020: all 3 authors counted without a position filter; only the first
+    # two (A, B) count when restricted to 1st/2nd position.
+    assert all_positions.loc[2020, "total"] == 3
+    assert lead_only.loc[2020, "total"] == 2
+    # C. Souza is 1st author of their own solo 2021 article, so they're still
+    # counted there even though they were 3rd author in 2020.
+    assert lead_only.loc[2021, "total"] == 1
+
+
+def test_cumulative_researchers_max_position_excludes_third_author():
+    df = _multi_author_df()
+    cum = cumulative_researchers(df, max_position=1)
+    assert cum["total"].iloc[-1] == 3  # A, B (2020) + C (2021, as 1st author there)
