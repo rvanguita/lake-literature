@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import streamlit as st
 
 from lake_literature.dashboard import loaders
+from lake_literature.dashboard.airflow_client import AirflowError
 from lake_literature.dashboard.pipeline_control import (
     DAG_IDS,
     STAGE_LABELS,
@@ -13,6 +16,8 @@ from lake_literature.dashboard.pipeline_control import (
     trigger_stage,
 )
 from lake_literature.dashboard.theme import SOURCE_LABELS, polish_figure_layout, theme_tokens
+
+logger = logging.getLogger(__name__)
 
 _TERMINAL_STATES = ("success", "failed", "error")
 
@@ -30,7 +35,8 @@ def _refresh_runs() -> None:
             continue
         try:
             updated = poll_run(run_ref)
-        except Exception as exc:  # Airflow unreachable, etc.
+        except AirflowError as exc:
+            logger.warning("_refresh_runs: could not poll stage %r", stage, exc_info=True)
             updated = dict(run_ref, state="error", error=str(exc))
         runs[stage] = updated
         if updated.get("state") == "success" and prev_state != "success":
@@ -42,7 +48,8 @@ def _refresh_runs() -> None:
 def _trigger(stage: str) -> None:
     try:
         st.session_state.pipeline_runs[stage] = trigger_stage(stage)
-    except Exception as exc:  # Airflow unreachable, DAG not found, etc.
+    except AirflowError as exc:
+        logger.warning("_trigger: could not trigger stage %r", stage, exc_info=True)
         st.session_state.pipeline_runs[stage] = {
             "stage": stage,
             "dag_id": DAG_IDS.get(stage, stage),
@@ -77,14 +84,11 @@ def _prepare_filter_state(articles_df: pd.DataFrame) -> tuple[list[int], list[st
         if isinstance(current, (int, float)):
             current = (int(current), int(current))
             st.session_state.global_year_range = current
-        if (
-            "global_year_range" in st.session_state
-            and (
-                not isinstance(current, (tuple, list))
-                or len(current) != 2
-                or current[0] < bounds[0]
-                or current[1] > bounds[1]
-            )
+        if "global_year_range" in st.session_state and (
+            not isinstance(current, (tuple, list))
+            or len(current) != 2
+            or current[0] < bounds[0]
+            or current[1] > bounds[1]
         ):
             st.session_state.global_year_range = bounds
     else:
@@ -195,7 +199,9 @@ def render_sidebar() -> None:
                             extra = f" ({n_ok}/{len(tasks)} tarefas concluídas)"
                         st.success(f"{label}: concluído{extra}")
                     elif state == "failed":
-                        st.error(f"{label}: falhou (execução `{run_id}`, verifique os logs no Airflow)")
+                        st.error(
+                            f"{label}: falhou (execução `{run_id}`, verifique os logs no Airflow)"
+                        )
                     elif state == "error":
                         st.error(f"{label}: {run_ref.get('error', 'erro desconhecido')}")
                     else:
@@ -207,9 +213,7 @@ def render_sidebar() -> None:
             st.rerun()
         if layer != "none" and not articles_df.empty:
             _, filtered_df = loaders.filtered_articles()
-            st.caption(
-                f"{len(filtered_df):,}/{len(articles_df):,} artigos · camada **{layer}**"
-            )
+            st.caption(f"{len(filtered_df):,}/{len(articles_df):,} artigos · camada **{layer}**")
 
 
 def page_header(icon: str, title: str, description: str) -> None:
@@ -222,7 +226,7 @@ def metric_row(metrics: list[tuple[str, str, str | None]]) -> None:
     """A bordered row of metrics: list of (label, value, delta|None)."""
     with st.container(border=True):
         cols = st.columns(len(metrics))
-        for col, (label, value, delta) in zip(cols, metrics):
+        for col, (label, value, delta) in zip(cols, metrics, strict=True):
             col.metric(label, value, delta)
 
 
@@ -260,7 +264,10 @@ def require_columns(df: pd.DataFrame, cols: list[str], message: str | None = Non
     missing = [c for c in cols if c not in df.columns]
     if not missing:
         return True
-    st.info(message or f"Coluna(s) {', '.join(f'`{c}`' for c in missing)} não disponível(is) nesta camada.")
+    st.info(
+        message
+        or f"Coluna(s) {', '.join(f'`{c}`' for c in missing)} não disponível(is) nesta camada."
+    )
     return False
 
 

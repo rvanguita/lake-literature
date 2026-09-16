@@ -17,7 +17,7 @@ def render() -> None:
     page_header(
         "📊",
         "Visão Geral",
-        "Pipeline de revisão sistemática de literatura sobre \"planejamento de redes de distribuição de energia\" — "
+        'Pipeline de revisão sistemática de literatura sobre "planejamento de redes de distribuição de energia" — '
         "IEEE Xplore e ScienceDirect/Elsevier consolidados através das "
         "camadas raw → bronze → silver → gold.",
     )
@@ -79,10 +79,7 @@ def _charts_grid(articles_df: pd.DataFrame, years_df: pd.DataFrame) -> None:
         st.subheader("Distribuição por Base / Fonte")
         if "source" in articles_df.columns:
             by_source = (
-                articles_df["source"]
-                .value_counts()
-                .rename_axis("source")
-                .reset_index(name="count")
+                articles_df["source"].value_counts().rename_axis("source").reset_index(name="count")
             )
             fig = px.pie(
                 by_source,
@@ -145,7 +142,9 @@ def _charts_grid(articles_df: pd.DataFrame, years_df: pd.DataFrame) -> None:
             st.info("Coluna 'venue' não disponível nesta camada.")
 
 
-def _numbers_summary(articles_df: pd.DataFrame, years_df: pd.DataFrame, chunks_df: pd.DataFrame) -> None:
+def _numbers_summary(
+    articles_df: pd.DataFrame, years_df: pd.DataFrame, chunks_df: pd.DataFrame
+) -> None:
     st.subheader("📋 Resumo em números")
 
     n_total = len(articles_df)

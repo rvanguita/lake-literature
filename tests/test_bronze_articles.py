@@ -7,11 +7,17 @@ from lake_literature.transform.bronze_articles import (
 
 
 def test_normalize_doi_strips_https_prefix():
-    assert normalize_doi("https://doi.org/10.1016/j.ijepes.2020.106042") == "10.1016/j.ijepes.2020.106042"
+    assert (
+        normalize_doi("https://doi.org/10.1016/j.ijepes.2020.106042")
+        == "10.1016/j.ijepes.2020.106042"
+    )
 
 
 def test_normalize_doi_strips_http_dx_prefix():
-    assert normalize_doi("http://dx.doi.org/10.1109/TPWRS.2024.3418651") == "10.1109/tpwrs.2024.3418651"
+    assert (
+        normalize_doi("http://dx.doi.org/10.1109/TPWRS.2024.3418651")
+        == "10.1109/tpwrs.2024.3418651"
+    )
 
 
 def test_normalize_doi_casefolds_bare_doi():

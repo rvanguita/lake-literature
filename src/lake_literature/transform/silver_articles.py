@@ -65,10 +65,10 @@ def _merge_group(doi: str, group: list[BronzeArticle]) -> dict:
     }
 
 
-def _link_pdfs(session: Session, silver_rows: list[SilverArticle], pdf_files: list[PdfFile]) -> None:
-    choices = {
-        row.id: normalize_title(row.title) for row in silver_rows if row.title
-    }
+def _link_pdfs(
+    session: Session, silver_rows: list[SilverArticle], pdf_files: list[PdfFile]
+) -> None:
+    choices = {row.id: normalize_title(row.title) for row in silver_rows if row.title}
     if not choices:
         return
 

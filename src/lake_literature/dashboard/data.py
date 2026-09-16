@@ -8,10 +8,15 @@ meant to be usable even before the pipeline has been run end to end.
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from lake_literature.db.engines import get_engine
+
+logger = logging.getLogger(__name__)
 
 LAYER_TABLES = {
     "raw": ["source_files", "config", "ieee_csv_rows", "bib_entries", "pdf_files"],
@@ -25,7 +30,8 @@ def table_exists(layer: str, table: str) -> bool:
     try:
         engine = get_engine(layer)
         return inspect(engine).has_table(table)
-    except Exception:
+    except SQLAlchemyError:
+        logger.warning("table_exists(%r, %r): database unreachable", layer, table, exc_info=True)
         return False
 
 
@@ -40,17 +46,16 @@ def layer_row_counts() -> pd.DataFrame:
                 engine = get_engine(layer)
                 if inspect(engine).has_table(table):
                     with engine.connect() as conn:
-                        count = conn.execute(
-                            text(f"SELECT COUNT(*) FROM `{table}`")
-                        ).scalar()
+                        count = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`")).scalar()
                 else:
                     count = 0
                     status = "no table yet"
-            except Exception as exc:  # DB unreachable, database missing, etc.
+            except SQLAlchemyError as exc:
+                logger.warning(
+                    "layer_row_counts(%r, %r): database unreachable", layer, table, exc_info=True
+                )
                 status = f"unreachable ({type(exc).__name__})"
-            rows.append(
-                {"layer": layer, "table": table, "rows": count, "status": status}
-            )
+            rows.append({"layer": layer, "table": table, "rows": count, "status": status})
     return pd.DataFrame(rows)
 
 
@@ -102,22 +107,25 @@ def raw_funnel_counts() -> dict[str, dict[str, int]]:
     `source` column of its own (the CSV is IEEE-only), so it's reported as a
     single IEEE bucket alongside the two `bib_entries` sources.
     """
-    counts = {"ieee": {"csv_rows": 0, "bib_entries": 0}, "elsevier": {"csv_rows": 0, "bib_entries": 0}}
+    counts = {
+        "ieee": {"csv_rows": 0, "bib_entries": 0},
+        "elsevier": {"csv_rows": 0, "bib_entries": 0},
+    }
     try:
         engine = get_engine("raw")
         with engine.connect() as conn:
             if inspect(engine).has_table("ieee_csv_rows"):
-                counts["ieee"]["csv_rows"] = conn.execute(
-                    text("SELECT COUNT(*) FROM `ieee_csv_rows`")
-                ).scalar() or 0
+                counts["ieee"]["csv_rows"] = (
+                    conn.execute(text("SELECT COUNT(*) FROM `ieee_csv_rows`")).scalar() or 0
+                )
             if inspect(engine).has_table("bib_entries"):
                 for source, n in conn.execute(
                     text("SELECT source, COUNT(*) FROM `bib_entries` GROUP BY source")
                 ):
                     counts.setdefault(source, {"csv_rows": 0, "bib_entries": 0})
                     counts[source]["bib_entries"] = n
-    except Exception:
-        pass
+    except SQLAlchemyError:
+        logger.warning("raw_funnel_counts: database unreachable", exc_info=True)
     return counts
 
 
@@ -138,6 +146,6 @@ def bronze_doi_dropped_counts() -> dict[str, int]:
                 text("SELECT source, COUNT(*) FROM `articles` WHERE doi IS NULL GROUP BY source")
             ):
                 result[source] = n
-    except Exception:
-        pass
+    except SQLAlchemyError:
+        logger.warning("bronze_doi_dropped_counts: database unreachable", exc_info=True)
     return result

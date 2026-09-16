@@ -15,6 +15,7 @@ error is the appropriate amount of machine learning for the amount of data.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -22,6 +23,8 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures
+
+logger = logging.getLogger(__name__)
 
 MIN_TRAIN_YEAR = 2010  # matches topics.TREND_MIN_YEAR -- earlier years are too sparse to trend
 TRAIN_END_YEAR = 2025  # last *complete* year in the corpus
@@ -82,7 +85,9 @@ def yearly_counts(df: pd.DataFrame, source: str | None = None) -> pd.Series:
         if "source" in working.columns:
             working = working[working["source"] == source]
         elif "sources" in working.columns:
-            working = working[working["sources"].apply(lambda s: isinstance(s, list) and source in s)]
+            working = working[
+                working["sources"].apply(lambda s: isinstance(s, list) and source in s)
+            ]
     years = pd.to_numeric(working.get("year"), errors="coerce").dropna().astype(int)
     if years.empty:
         return pd.Series(dtype=float)
@@ -91,7 +96,9 @@ def yearly_counts(df: pd.DataFrame, source: str | None = None) -> pd.Series:
     return counts.reindex(full_index, fill_value=0).astype(float)
 
 
-def _rolling_origin_cv(years: np.ndarray, values: np.ndarray, cv_years: tuple[int, ...]) -> dict[str, float]:
+def _rolling_origin_cv(
+    years: np.ndarray, values: np.ndarray, cv_years: tuple[int, ...]
+) -> dict[str, float]:
     """Mean CV MAE per candidate: for each year in `cv_years`, train on every
     earlier year in `years` and score against that year's actual value.
     """
@@ -107,6 +114,11 @@ def _rolling_origin_cv(years: np.ndarray, values: np.ndarray, cv_years: tuple[in
                 predict = _fit_model(kind, train_x, train_y)
                 errors[kind].append(_mae([actual], predict([cv_year])))
             except Exception:
+                # Some candidate model kinds (e.g. log-linear on non-positive
+                # values) can't fit every fold -- skip that kind for this fold.
+                logger.debug(
+                    "_rolling_origin_cv: %r failed to fit for year %r", kind, cv_year, exc_info=True
+                )
                 continue
     return {kind: float(np.mean(v)) if v else float("nan") for kind, v in errors.items()}
 
@@ -162,8 +174,12 @@ def fit_and_forecast(
     rows = []
     for kind in _CANDIDATES:
         predict = _fit_model(kind, train_years, train_values)
-        holdout_pred = float(predict([holdout_year])[0]) if holdout_actual is not None else float("nan")
-        holdout_mae = abs(holdout_pred - holdout_actual) if holdout_actual is not None else float("nan")
+        holdout_pred = (
+            float(predict([holdout_year])[0]) if holdout_actual is not None else float("nan")
+        )
+        holdout_mae = (
+            abs(holdout_pred - holdout_actual) if holdout_actual is not None else float("nan")
+        )
         rows.append(
             {
                 "model": kind,
@@ -189,7 +205,9 @@ def fit_and_forecast(
 
     fitted_curve = pd.Series(final_predict(final_years), index=final_years)
     residuals = final_values - fitted_curve.to_numpy()
-    residual_std = float(np.std(residuals, ddof=1)) if len(residuals) > 2 else float(np.std(residuals))
+    residual_std = (
+        float(np.std(residuals, ddof=1)) if len(residuals) > 2 else float(np.std(residuals))
+    )
     ss_res = float(np.sum(residuals**2))
     ss_tot = float(np.sum((final_values - final_values.mean()) ** 2))
     r2_train = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")

@@ -47,7 +47,9 @@ def create_tables() -> None:
                 cols = {c["name"] for c in inspector.get_columns("articles")}
                 if "reference_count" not in cols:
                     with engine.connect() as conn:
-                        conn.execute(text("ALTER TABLE `articles` ADD COLUMN `reference_count` INT NULL"))
+                        conn.execute(
+                            text("ALTER TABLE `articles` ADD COLUMN `reference_count` INT NULL")
+                        )
                         conn.commit()
                 if layer == "gold" and "sources" not in cols:
                     with engine.connect() as conn:

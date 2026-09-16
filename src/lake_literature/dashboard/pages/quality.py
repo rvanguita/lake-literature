@@ -9,10 +9,21 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from lake_literature.dashboard import loaders
-from lake_literature.dashboard.components import hero_banner, metric_row, page_header, render_chart, require_columns
+from lake_literature.dashboard import actions, loaders
+from lake_literature.dashboard.components import (
+    hero_banner,
+    metric_row,
+    page_header,
+    render_chart,
+    require_columns,
+)
 from lake_literature.dashboard.search import semantic_search
-from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, CHART_HEIGHT, SOURCE_COLORS, theme_tokens
+from lake_literature.dashboard.theme import (
+    CATEGORICAL_PALETTE,
+    CHART_HEIGHT,
+    SOURCE_COLORS,
+    theme_tokens,
+)
 from lake_literature.transform.gold_articles import CHUNK_MAX_CHARS
 
 SEARCH_DEMO_MAX_RESULTS = 10
@@ -71,7 +82,10 @@ def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
                 "bgcolor": t["chart_bg"],
                 "borderwidth": 0,
             },
-            title={"text": "% de chunks com embedding gerado", "font": {"color": t["chart_text"], "size": 14}},
+            title={
+                "text": "% de chunks com embedding gerado",
+                "font": {"color": t["chart_text"], "size": 14},
+            },
         )
     )
     if with_embedding and "embed_model" in chunks_df.columns:
@@ -92,27 +106,23 @@ def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
     )
 
     if pending > 0:
-        if st.button(f"🚀 Gerar embeddings agora ({pending:,} chunks pendentes)", key="generate_embeddings"):
+        if st.button(
+            f"🚀 Gerar embeddings agora ({pending:,} chunks pendentes)", key="generate_embeddings"
+        ):
             _run_embedding_generation(pending)
 
 
 def _run_embedding_generation(pending: int) -> None:
-    from lake_literature.db.engines import get_session
-    from lake_literature.transform.embeddings import build_embeddings
-
     progress_bar = st.progress(0.0, text=f"Gerando embeddings (0/{pending})...")
 
     def on_progress(done: int, total_pending: int) -> None:
         progress_bar.progress(
-            min(done / total_pending, 1.0), text=f"Gerando embeddings ({done:,}/{total_pending:,})..."
+            min(done / total_pending, 1.0),
+            text=f"Gerando embeddings ({done:,}/{total_pending:,})...",
         )
 
-    session = get_session("gold")
-    try:
-        with st.spinner("Carregando o modelo de embeddings (primeira execução baixa os pesos)..."):
-            stats = build_embeddings(session, on_progress=on_progress)
-    finally:
-        session.close()
+    with st.spinner("Carregando o modelo de embeddings (primeira execução baixa os pesos)..."):
+        stats = actions.run_embedding_generation(on_progress=on_progress)
 
     st.success(f"{stats['embedded']:,} chunks embedados. Atualizando a página...")
     st.cache_data.clear()
@@ -129,9 +139,13 @@ def _fulltext_coverage(articles_df: pd.DataFrame, chunks_df: pd.DataFrame) -> No
 
     dois_with_fulltext = set()
     if not chunks_df.empty and "chunk_type" in chunks_df.columns and "doi" in chunks_df.columns:
-        dois_with_fulltext = set(chunks_df.loc[chunks_df["chunk_type"] == "fulltext", "doi"].dropna())
+        dois_with_fulltext = set(
+            chunks_df.loc[chunks_df["chunk_type"] == "fulltext", "doi"].dropna()
+        )
     n_with_fulltext_chunks = (
-        int(articles_df["doi"].isin(dois_with_fulltext).sum()) if "doi" in articles_df.columns else 0
+        int(articles_df["doi"].isin(dois_with_fulltext).sum())
+        if "doi" in articles_df.columns
+        else 0
     )
     n_pdf_no_chunks = n_with_pdf - n_with_fulltext_chunks
 
@@ -143,13 +157,21 @@ def _fulltext_coverage(articles_df: pd.DataFrame, chunks_df: pd.DataFrame) -> No
     )
     col_funnel, col_metrics = st.columns([2, 1])
     with col_funnel:
-        fig = px.funnel(funnel_df, x="count", y="stage", title="Funil de disponibilidade de texto completo")
-        fig.update_traces(marker_color=[CATEGORICAL_PALETTE[0], CATEGORICAL_PALETTE[3], CATEGORICAL_PALETTE[2]])
+        fig = px.funnel(
+            funnel_df, x="count", y="stage", title="Funil de disponibilidade de texto completo"
+        )
+        fig.update_traces(
+            marker_color=[CATEGORICAL_PALETTE[0], CATEGORICAL_PALETTE[3], CATEGORICAL_PALETTE[2]]
+        )
         render_chart(fig)
     with col_metrics:
         metric_row(
             [
-                ("📎 Artigos com PDF", f"{n_with_pdf:,}", f"{n_with_pdf / n_total:.1%}" if n_total else None),
+                (
+                    "📎 Artigos com PDF",
+                    f"{n_with_pdf:,}",
+                    f"{n_with_pdf / n_total:.1%}" if n_total else None,
+                ),
             ]
         )
         metric_row(
@@ -176,9 +198,7 @@ def _metadata_richness(articles_df: pd.DataFrame) -> None:
 
     richness = articles_df.copy()
     richness["abstract_len"] = (
-        richness["abstract"].fillna("").astype(str).str.len()
-        if "abstract" in richness
-        else 0
+        richness["abstract"].fillna("").astype(str).str.len() if "abstract" in richness else 0
     )
     richness["n_keywords"] = (
         richness["keywords"].apply(lambda k: len(k) if isinstance(k, list) else 0)
@@ -238,14 +258,20 @@ def _chunks(chunks_df: pd.DataFrame) -> None:
         )
         return
 
-    if not require_columns(chunks_df, ["chunk_type"], "A tabela de chunks não possui o campo `chunk_type`."):
+    if not require_columns(
+        chunks_df, ["chunk_type"], "A tabela de chunks não possui o campo `chunk_type`."
+    ):
         return
     by_type = chunks_df["chunk_type"].value_counts().rename_axis("type").reset_index(name="count")
-    by_type["label_pt"] = by_type["type"].map({"abstract": "Resumo (Abstract)", "fulltext": "Texto Completo (Fulltext)"})
+    by_type["label_pt"] = by_type["type"].map(
+        {"abstract": "Resumo (Abstract)", "fulltext": "Texto Completo (Fulltext)"}
+    )
 
     col_type, col_len = st.columns(2)
     with col_type:
-        fig = px.pie(by_type, names="label_pt", values="count", title="Proporção de chunks por tipo")
+        fig = px.pie(
+            by_type, names="label_pt", values="count", title="Proporção de chunks por tipo"
+        )
         fig.update_traces(
             texttemplate="<b>%{label}</b><br><b>%{value:,} (%{percent})</b>",
             hovertemplate="<b>%{label}</b>: %{value:,} chunks (%{percent})<extra></extra>",
@@ -278,7 +304,9 @@ def _chunks(chunks_df: pd.DataFrame) -> None:
                 title="Tamanho dos chunks (caracteres) por tipo",
                 labels={"char_len": "Comprimento em caracteres", "chunk_type": "Tipo"},
             )
-            fig.update_traces(hovertemplate="Tamanho: ~%{x} caracteres<br>Chunks: %{y:,}<extra></extra>")
+            fig.update_traces(
+                hovertemplate="Tamanho: ~%{x} caracteres<br>Chunks: %{y:,}<extra></extra>"
+            )
             fig.update_layout(
                 xaxis_title=f"Caracteres por fragmento (teto de chunking: {CHUNK_MAX_CHARS:,})",
                 yaxis_title="Quantidade de chunks",
@@ -327,7 +355,9 @@ def _chunks(chunks_df: pd.DataFrame) -> None:
     )
 
 
-def _render_result_card(row: pd.Series, term_pattern: re.Pattern | None, score: float | None) -> None:
+def _render_result_card(
+    row: pd.Series, term_pattern: re.Pattern | None, score: float | None
+) -> None:
     text = str(row["text"])
     if term_pattern:
         match = term_pattern.search(text)
@@ -369,7 +399,9 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
             "pipeline). Serve para mostrar, na prática, o formato dos trechos que um RAG real usaria como "
             "contexto de resposta."
         )
-    if not require_columns(chunks_df, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."):
+    if not require_columns(
+        chunks_df, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."
+    ):
         return
 
     query = st.text_input(
@@ -381,7 +413,9 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
 
     if has_embeddings:
         matches = semantic_search(query, chunks_df, top_k=SEARCH_DEMO_MAX_RESULTS)
-        st.caption(f"Top {len(matches):,} chunks mais similares à consulta (de {len(chunks_df):,} disponíveis).")
+        st.caption(
+            f"Top {len(matches):,} chunks mais similares à consulta (de {len(chunks_df):,} disponíveis)."
+        )
     else:
         mask = chunks_df["text"].str.contains(query, case=False, na=False, regex=False)
         n_total_matches = int(mask.sum())

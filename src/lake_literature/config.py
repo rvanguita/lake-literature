@@ -59,7 +59,7 @@ class MySQLSettings:
     db_prefix: str
 
     @classmethod
-    def from_env(cls) -> "MySQLSettings":
+    def from_env(cls) -> MySQLSettings:
         return cls(
             host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
             port=int(os.environ.get("MYSQL_PORT", "3306")),
@@ -76,8 +76,7 @@ class MySQLSettings:
     def server_url(self) -> str:
         """Connection URL with no database selected (for CREATE DATABASE)."""
         return (
-            f"mysql+pymysql://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/?charset=utf8mb4"
+            f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/?charset=utf8mb4"
         )
 
     def layer_url(self, layer: str) -> str:

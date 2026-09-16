@@ -123,9 +123,7 @@ def run(stage: str) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="lake-literature medallion pipeline")
-    parser.add_argument(
-        "--stage", choices=STAGES, default="all", help="pipeline stage to run"
-    )
+    parser.add_argument("--stage", choices=STAGES, default="all", help="pipeline stage to run")
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     run(args.stage)
 

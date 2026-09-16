@@ -10,6 +10,7 @@ get 'fulltext' chunks extracted via pypdf and split into fixed-size windows.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from pypdf import PdfReader
@@ -20,6 +21,8 @@ from lake_literature.config import absolute_path
 from lake_literature.db.gold_models import Article as GoldArticle
 from lake_literature.db.gold_models import Chunk
 from lake_literature.db.silver_models import Article as SilverArticle
+
+logger = logging.getLogger(__name__)
 
 CHUNK_MAX_CHARS = 1500
 CHUNK_OVERLAP_CHARS = 200
@@ -42,12 +45,18 @@ def _extract_pdf_text(pdf_path: str) -> str:
         reader = PdfReader(absolute_path(pdf_path))
         pages = [page.extract_text() or "" for page in reader.pages]
     except Exception:
+        # pypdf can raise many different exception types on a malformed/
+        # encrypted/truncated PDF; log so a failed extraction is diagnosable
+        # instead of silently indistinguishable from "PDF has no text".
+        logger.warning("_extract_pdf_text: failed to extract text from %r", pdf_path, exc_info=True)
         return ""
     text = "\n\n".join(pages)
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
-def _chunk_text(text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> list[str]:
+def _chunk_text(
+    text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP_CHARS
+) -> list[str]:
     text = text.strip()
     if not text:
         return []

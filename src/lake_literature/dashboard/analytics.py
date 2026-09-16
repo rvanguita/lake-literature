@@ -42,9 +42,7 @@ def source_counts_by(df: pd.DataFrame, index_col: str) -> pd.DataFrame:
 
     has_source = "source" in df.columns
     if has_source:
-        pivot = (
-            df.groupby([index_col, "source"]).size().unstack(fill_value=0)
-        )
+        pivot = df.groupby([index_col, "source"]).size().unstack(fill_value=0)
         for src in ("ieee", "elsevier"):
             if src not in pivot.columns:
                 pivot[src] = 0
@@ -94,9 +92,7 @@ def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total")
         working["venue"].isin(top_venues), OTHERS_LABEL
     )
 
-    by_year_venue = (
-        working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
-    )
+    by_year_venue = working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
     years = sorted(by_year_venue["year"].unique())
     venues = list(by_year_venue["venue_bucket"].unique())
     full_index = pd.MultiIndex.from_product([years, venues], names=["year", "venue_bucket"])
@@ -147,7 +143,9 @@ def explode_keywords(df: pd.DataFrame) -> pd.DataFrame:
     keep = [c for c in ("year", "source", "venue", "doi") if c in df.columns]
     working = df[["keywords", *keep]].copy()
     working = working.explode("keywords").rename(columns={"keywords": "keyword"})
-    working = working[working["keyword"].notna() & (working["keyword"].astype(str).str.strip() != "")]
+    working = working[
+        working["keyword"].notna() & (working["keyword"].astype(str).str.strip() != "")
+    ]
     working["keyword"] = working["keyword"].astype(str).str.strip().str.lower()
     return working.reset_index(drop=True)
 
@@ -208,7 +206,9 @@ LAYER_ORDER = ("raw", "bronze", "silver", "gold")
 LAYER_LABELS = {"raw": "Raw", "bronze": "Bronze", "silver": "Silver", "gold": "Gold"}
 
 
-def layer_source_counts(bronze_df: pd.DataFrame, silver_df: pd.DataFrame, gold_df: pd.DataFrame) -> pd.DataFrame:
+def layer_source_counts(
+    bronze_df: pd.DataFrame, silver_df: pd.DataFrame, gold_df: pd.DataFrame
+) -> pd.DataFrame:
     """IEEE / Elsevier / total article counts for bronze, silver, and gold.
 
     Bronze has a scalar `source`; silver/gold only carry a `sources` list --

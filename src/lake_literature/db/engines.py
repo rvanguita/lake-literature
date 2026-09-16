@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from lake_literature.config import LAYERS, get_settings
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_engine(layer: str) -> Engine:
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r}, expected one of {LAYERS}")
