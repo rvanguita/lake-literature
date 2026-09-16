@@ -17,14 +17,41 @@ venv/
 .env.*
 !.env.example
 
-# Ferramentas locais do Claude Code (não é conteúdo do projeto)
-.claude/
+# Claude Code local/secret-shaped state (project skills/commands stay tracked)
+.claude/settings.local.json
+.claude/history/
+.claude/todos/
 
 # Dados binários grandes / regeneráveis (não versionar)
 data/articles/
-data/ieee/*.zip
+data/ieee/
 data/sciencedirect.zip
 data/enrichment_cache.json
+
+# Airflow local runtime (host runs, outside Docker's named volumes)
+airflow/airflow.db
+airflow/logs/
+airflow/webserver_config.py
+airflow/simple_auth_manager_passwords.json.generated
+airflow/standalone_admin_password.txt
+
+# Test / coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs & local databases
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
 
 # OS
 .DS_Store
