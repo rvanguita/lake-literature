@@ -541,9 +541,16 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
         if by_year.empty:
             st.info("Sem anos válidos para este gráfico.")
         else:
-            fig = source_bars(by_year, "year", total_line=True)
+            fig = source_bars(
+                by_year,
+                "year",
+                total_line=True,
+                title="Volume Anual de Artigos em Periódicos A1-A3, por Base",
+            )
             fig.update_layout(
-                hovermode="x unified", xaxis_title="Ano de publicação", yaxis_title="Artigos"
+                hovermode="x unified",
+                xaxis_title="Ano de Publicação",
+                yaxis_title="Quantidade de Artigos",
             )
             render_chart(
                 fig,
@@ -553,7 +560,12 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
         top_combined = (
             source_counts_by(combined_df, "venue").sort_values("total", ascending=False).head(15)
         )
-        fig = source_topn_hbar(top_combined, "venue", x_title="Artigos")
+        fig = source_topn_hbar(
+            top_combined,
+            "venue",
+            title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Base",
+            x_title="Quantidade de Artigos",
+        )
         render_chart(
             fig,
             caption="Periódicos mais publicados pelo corpus, somando os estratos A1, A2 e A3, "
@@ -566,7 +578,11 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
         top_venues = combined_df["venue"].value_counts().head(15)
         venue_to_estrato = combined_df.drop_duplicates("venue").set_index("venue")["estrato"]
         fig = topn_hbar(
-            top_venues, color_by=venue_to_estrato, palette=tier_palette, x_title="Artigos"
+            top_venues,
+            color_by=venue_to_estrato,
+            palette=tier_palette,
+            title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Classificação CAPES/Qualis",
+            x_title="Quantidade de Artigos",
         )
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
         render_chart(
@@ -589,13 +605,16 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
                 color="estrato",
                 category_orders={"estrato": ["A1", "A2", "A3"], "source": ["ieee", "elsevier"]},
                 color_discrete_map=tier_palette,
+                title="Distribuição de Artigos A1/A2/A3 por Base (IEEE vs. Elsevier)",
                 labels={"source": "Base", "count": "Artigos", "estrato": "Classificação"},
             )
             fig.update_traces(
                 hovertemplate="<b>%{data.name}</b><br>%{x}: %{y:,} artigos<extra></extra>"
             )
             fig.update_layout(
-                xaxis_title="Base", yaxis_title="Artigos", legend_title_text="Classificação"
+                xaxis_title="Base (Editora)",
+                yaxis_title="Quantidade de Artigos",
+                legend_title_text="Classificação",
             )
             render_chart(
                 fig,
