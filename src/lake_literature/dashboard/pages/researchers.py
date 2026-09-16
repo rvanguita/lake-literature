@@ -11,6 +11,8 @@ import streamlit as st
 
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
+    RECENT_WINDOW_YEARS,
+    author_count_series,
     author_display_name,
     canonical_author,
     explode_authors,
@@ -30,7 +32,6 @@ from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, theme_tokens
 TOP_AUTHORS = 25
 MIN_PAPERS_FOR_NETWORK = 4
 TOP_NETWORK_AUTHORS = 18
-RECENT_WINDOW_YEARS = 5
 
 
 @st.cache_data(
@@ -86,26 +87,34 @@ def render() -> None:
             ("📗 Com ≥3 artigos", f"{n_3plus:,}", None),
             (
                 "✍️ Média de autores/artigo",
-                f"{articles_df['authors'].apply(lambda a: len(a) if isinstance(a, list) else 0).mean():.1f}",
+                f"{author_count_series(articles_df).mean():.1f}",
                 None,
             ),
         ]
     )
 
     st.divider()
-    _top_authors(author_rows)
-    st.divider()
-    _production_heatmap(author_rows)
-    st.divider()
-    _emerging_vs_established(author_rows)
-    st.divider()
-    _volume_vs_impact(author_rows)
-    st.divider()
-    _coauthorship_network(author_rows)
-    st.divider()
-    _research_line_leaders(author_rows, articles_df)
-    st.divider()
-    _author_keyword_profile(author_rows, articles_df)
+    tab_ranking, tab_production, tab_collab, tab_explore = st.tabs(
+        ["🏅 Ranking", "🗓️ Produção", "🕸️ Colaboração", "🔎 Exploração"]
+    )
+
+    with tab_ranking:
+        _top_authors(author_rows)
+
+    with tab_production:
+        _production_heatmap(author_rows)
+        st.divider()
+        _emerging_vs_established(author_rows)
+        st.divider()
+        _volume_vs_impact(author_rows)
+
+    with tab_collab:
+        _coauthorship_network(author_rows)
+
+    with tab_explore:
+        _research_line_leaders(author_rows, articles_df)
+        st.divider()
+        _author_keyword_profile(author_rows, articles_df)
 
 
 def _top_authors(author_rows: pd.DataFrame) -> None:

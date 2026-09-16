@@ -9,6 +9,7 @@ import streamlit as st
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
     OTHERS_LABEL,
+    author_count_series,
     cumulative_by_source,
     cumulative_by_venue,
     source_counts_by,
@@ -206,8 +207,7 @@ def _collaboration(articles_df: pd.DataFrame) -> None:
     st.subheader("👥 Colaboração: autores por artigo")
     if not require_columns(articles_df, ["authors"]):
         return
-    n_authors = articles_df["authors"].apply(lambda a: len(a) if isinstance(a, list) else 0)
-    with_authors = articles_df.assign(n_authors=n_authors)
+    with_authors = articles_df.assign(n_authors=author_count_series(articles_df))
     with_authors = with_authors[with_authors["n_authors"] > 0]
 
     if with_authors.empty:

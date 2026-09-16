@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 from lake_literature.dashboard import loaders
-from lake_literature.dashboard.analytics import source_means, valid_years
-from lake_literature.dashboard.charts import topn_hbar
+from lake_literature.dashboard.analytics import (
+    author_count_series,
+    source_counts_by,
+    source_means,
+    valid_years,
+)
+from lake_literature.dashboard.charts import source_lines, topn_hbar
 from lake_literature.dashboard.components import (
     article_table,
     metric_row,
@@ -17,7 +21,7 @@ from lake_literature.dashboard.components import (
     render_chart,
     require_columns,
 )
-from lake_literature.dashboard.theme import SOURCE_COLORS, SOURCE_LABELS, TOTAL_COLOR, hex_to_rgba
+from lake_literature.dashboard.theme import SOURCE_COLORS
 
 MIN_CITED_ARTICLES = 3
 
@@ -31,21 +35,29 @@ def render() -> None:
 
     articles_df = loaders.require_articles()
 
-    _reference_distribution(articles_df)
-    st.divider()
-    _references_vs_citations(articles_df)
-    st.divider()
-    _top_referenced(articles_df)
-    st.divider()
-    _collaboration_team_size(articles_df)
-    st.divider()
-    _top_cited(articles_df)
-    st.divider()
-    _cited_by_year(articles_df)
-    st.divider()
-    _top_authors(articles_df)
-    st.divider()
-    _venue_impact(articles_df)
+    tab_refs, tab_citations, tab_collab, tab_rankings = st.tabs(
+        ["📚 Referências", "⭐ Citações", "👥 Colaboração", "🏅 Rankings"]
+    )
+
+    with tab_refs:
+        _reference_distribution(articles_df)
+        st.divider()
+        _references_vs_citations(articles_df)
+        st.divider()
+        _top_referenced(articles_df)
+
+    with tab_citations:
+        _top_cited(articles_df)
+        st.divider()
+        _cited_by_year(articles_df)
+
+    with tab_collab:
+        _collaboration_team_size(articles_df)
+
+    with tab_rankings:
+        _top_authors(articles_df)
+        st.divider()
+        _venue_impact(articles_df)
 
 
 def _reference_distribution(articles_df: pd.DataFrame) -> None:
@@ -256,11 +268,7 @@ def _collaboration_team_size(articles_df: pd.DataFrame) -> None:
     if not require_columns(articles_df, ["authors"]):
         return
 
-    collab_df = articles_df.assign(
-        author_count=articles_df["authors"].apply(
-            lambda a: len(a) if isinstance(a, list) else (1 if pd.notna(a) else 0)
-        )
-    )
+    collab_df = articles_df.assign(author_count=author_count_series(articles_df))
     collab_df = collab_df[collab_df["author_count"] > 0]
     means = source_means(collab_df, "author_count")
     solo_pct = float((collab_df["author_count"] == 1).mean())
@@ -341,56 +349,16 @@ def _cited_by_year(articles_df: pd.DataFrame) -> None:
         st.info("Nenhum artigo com citações registradas nesta camada.")
         return
 
-    years_sorted = sorted(cited["year"].unique())
-    by_year_source = (
-        cited.groupby(["year", "source"]).size()
-        if "source" in cited.columns
-        else pd.Series(dtype="int64")
+    counts = source_counts_by(cited, "year").sort_values("year")
+    fig = source_lines(
+        counts,
+        "year",
+        y_title="Artigos com citações (citation_count > 0)",
+        spline=True,
+        fill=True,
     )
-
-    fig = go.Figure()
-    sources_present = cited["source"].unique() if "source" in cited.columns else []
-
-    for src in ("ieee", "elsevier"):
-        if src in sources_present:
-            counts = (
-                by_year_source.xs(src, level="source")
-                if src in by_year_source.index.get_level_values("source")
-                else pd.Series(dtype=float)
-            ).reindex(years_sorted, fill_value=0)
-
-            fig.add_trace(
-                go.Scatter(
-                    x=years_sorted,
-                    y=counts.values,
-                    mode="lines+markers",
-                    name=SOURCE_LABELS.get(src, src),
-                    line=dict(color=SOURCE_COLORS.get(src), shape="spline", width=2),
-                    fill="tozeroy" if len(sources_present) == 1 else "none",
-                    fillcolor=hex_to_rgba(SOURCE_COLORS.get(src), 0.2),
-                    hovertemplate="Ano %{x}<br>"
-                    + f"{SOURCE_LABELS.get(src, src)}: "
-                    + "%{y:,} artigos citados<extra></extra>",
-                )
-            )
-
-    tot_by_year = cited.groupby("year").size().reindex(years_sorted, fill_value=0)
-    fig.add_trace(
-        go.Scatter(
-            x=years_sorted,
-            y=tot_by_year.values,
-            mode="lines+markers",
-            name="Total",
-            line=dict(color=TOTAL_COLOR, shape="spline", width=2.5, dash="solid"),
-            hovertemplate="Ano %{x}<br>Total: %{y:,} artigos citados<extra></extra>",
-        )
-    )
-
     fig.update_layout(
-        xaxis_title="Ano de publicação",
-        yaxis_title="Artigos com citações (citation_count > 0)",
-        hovermode="x unified",
-        legend_title_text="Base",
+        xaxis_title="Ano de publicação", hovermode="x unified", legend_title_text="Base"
     )
     render_chart(
         fig,

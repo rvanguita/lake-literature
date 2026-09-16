@@ -50,15 +50,23 @@ def render() -> None:
         f"<b>{len(chunks_df):,}</b> chunks prontos para recuperação.",
     )
 
-    _metadata_richness(articles_df)
-    st.divider()
-    _fulltext_coverage(articles_df, chunks_df)
-    st.divider()
-    _chunks(chunks_df)
-    st.divider()
-    _embedding_readiness(chunks_df)
-    st.divider()
-    _search_demo(chunks_df)
+    tab_metadata, tab_fulltext, tab_chunks, tab_search = st.tabs(
+        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔍 Busca"]
+    )
+
+    with tab_metadata:
+        _metadata_richness(articles_df)
+
+    with tab_fulltext:
+        _fulltext_coverage(articles_df, chunks_df)
+
+    with tab_chunks:
+        _chunks(chunks_df)
+        st.divider()
+        _embedding_readiness(chunks_df)
+
+    with tab_search:
+        _search_demo(chunks_df)
 
 
 def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
