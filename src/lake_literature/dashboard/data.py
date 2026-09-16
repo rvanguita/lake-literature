@@ -1,10 +1,9 @@
 """Data-loading helpers for the Streamlit dashboard.
 
-Reads directly from the single `medalhao` MySQL database (via the same
-engine the pipeline uses, see `db/engines.py`) and returns plain pandas
-DataFrames. Every function tolerates a layer/table that doesn't exist yet --
-the dashboard is meant to be usable even before the pipeline has been run
-end to end.
+Reads directly from the medallion MySQL databases (via the same per-layer
+engines the pipeline uses) and returns plain pandas DataFrames. Every
+function tolerates a layer/table that doesn't exist yet -- the dashboard is
+meant to be usable even before the pipeline has been run end to end.
 """
 
 from __future__ import annotations
@@ -27,15 +26,9 @@ LAYER_TABLES = {
         "lit_bib_entries",
         "lit_pdf_files",
     ],
-    "bronze": ["lit_articles_bronze"],
-    "silver": ["lit_articles_silver"],
-    "gold": ["lit_articles_gold", "lit_chunks"],
-}
-
-ARTICLES_TABLE = {
-    "bronze": "lit_articles_bronze",
-    "silver": "lit_articles_silver",
-    "gold": "lit_articles_gold",
+    "bronze": ["lit_articles"],
+    "silver": ["lit_articles"],
+    "gold": ["lit_articles", "lit_chunks"],
 }
 
 
@@ -73,11 +66,10 @@ def layer_row_counts() -> pd.DataFrame:
 
 
 def load_articles(layer: str) -> pd.DataFrame:
-    table = ARTICLES_TABLE[layer]
-    if not table_exists(layer, table):
+    if not table_exists(layer, "lit_articles"):
         return pd.DataFrame()
     engine = get_engine(layer)
-    return pd.read_sql_table(table, engine)
+    return pd.read_sql_table("lit_articles", engine)
 
 
 def load_search_configs() -> pd.DataFrame:
@@ -153,12 +145,13 @@ def bronze_doi_dropped_counts() -> dict[str, int]:
     result = {"ieee": 0, "elsevier": 0}
     try:
         engine = get_engine("bronze")
-        table = ARTICLES_TABLE["bronze"]
-        if not inspect(engine).has_table(table):
+        if not inspect(engine).has_table("lit_articles"):
             return result
         with engine.connect() as conn:
             for source, n in conn.execute(
-                text(f"SELECT source, COUNT(*) FROM `{table}` WHERE doi IS NULL GROUP BY source")
+                text(
+                    "SELECT source, COUNT(*) FROM `lit_articles` WHERE doi IS NULL GROUP BY source"
+                )
             ):
                 result[source] = n
     except SQLAlchemyError:

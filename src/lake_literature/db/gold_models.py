@@ -20,7 +20,7 @@ class Base(DeclarativeBase):
 
 
 class Article(Base):
-    __tablename__ = "lit_articles_gold"
+    __tablename__ = "lit_articles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
@@ -49,7 +49,7 @@ class Chunk(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    doi: Mapped[str] = mapped_column(String(255), index=True)  # value-FK to lit_articles_gold.doi
+    doi: Mapped[str] = mapped_column(String(255), index=True)  # value-FK to lit_articles.doi
     seq: Mapped[int] = mapped_column(Integer)
     chunk_type: Mapped[str] = mapped_column(String(32))  # 'abstract' | 'fulltext'
     text: Mapped[str] = mapped_column(Text)

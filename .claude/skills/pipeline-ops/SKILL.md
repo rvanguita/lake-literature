@@ -27,12 +27,12 @@ logic to keep in sync.
 
 ## Environment setup
 
-`.env` (git-ignored, copy from `.env.example`) needs `MYSQL_HOST/PORT/USER/PASSWORD/DATABASE` and
-`AIRFLOW_BASE_URL`. `bootstrap()` (called automatically at the start of every `pipeline.run()`) issues
-`CREATE DATABASE IF NOT EXISTS` for the single `medalhao` database (`MYSQL_DATABASE`) plus `create_all()`
-for every layer's tables in it — no manual DB setup needed beyond a reachable MySQL server and correct
-`.env` credentials. `MYSQL_HOST` may point at a shared server with unrelated databases — `bootstrap()` only
-ever touches the one `MYSQL_DATABASE` name, never anything else on that server.
+`.env` (git-ignored, copy from `.env.example`) needs `MYSQL_HOST/PORT/USER/PASSWORD` and `AIRFLOW_BASE_URL`.
+`bootstrap()` (called automatically at the start of every `pipeline.run()`) issues `CREATE DATABASE IF NOT
+EXISTS` for all four `raw`/`bronze`/`silver`/`gold` databases plus `create_all()` — no manual DB setup needed
+beyond a reachable MySQL server and correct `.env` credentials. `MYSQL_HOST` may point at a shared server
+where these database names already host unrelated tables from other projects — `bootstrap()`/the pipeline
+only ever create or touch `lit_`-prefixed tables within them, never anything else.
 
 ## Stage idempotency, at a glance
 
@@ -52,5 +52,5 @@ regenerate everything downstream of the layer they read from every time.
 There is **no persisted pipeline run-history table**. Every `run_*()` in `pipeline.py` prints its stats dict
 (`print(f"[stage] {stats}")`) and returns it — visible in stdout locally, or in the relevant task's log in
 the Airflow UI when run via a DAG. The dashboard's "Layers & Pipeline" page computes its funnel/counts live
-from current row counts in each layer's table, not from stored history — a discrepancy there means "what's
-in the DB right now," not "what happened on the last run."
+from current row counts in each database, not from stored history — a discrepancy there means "what's in the
+DB right now," not "what happened on the last run."

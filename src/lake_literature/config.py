@@ -1,10 +1,11 @@
 """Environment configuration for the medallion pipeline.
 
-Reads MySQL connection details from `.env` and exposes a single database name
-/ connection URL for the whole medallion pipeline (default `medalhao`, via
-`MYSQL_DATABASE`). All four layers (raw, bronze, silver, gold) share this one
-database; each layer's tables are distinguished by name instead of by living
-in separate databases -- see `db/*_models.py` for the per-layer table names.
+Reads MySQL connection details from `.env` and exposes one database name /
+connection URL per medallion layer (raw, bronze, silver, gold). Every layer
+lives in its own MySQL database, named plainly after the layer itself (e.g.
+`bronze`) -- note these databases are shared with unrelated tables from other
+projects on the same MySQL server; the pipeline only ever touches its own
+`lit_*`-prefixed tables within them.
 """
 
 from __future__ import annotations
@@ -63,7 +64,6 @@ class MySQLSettings:
     port: int
     user: str
     password: str
-    database: str
 
     @classmethod
     def from_env(cls) -> MySQLSettings:
@@ -72,8 +72,12 @@ class MySQLSettings:
             port=int(os.environ.get("MYSQL_PORT", "3306")),
             user=os.environ.get("MYSQL_USER", "root"),
             password=os.environ.get("MYSQL_PASSWORD", ""),
-            database=os.environ.get("MYSQL_DATABASE", "medalhao"),
         )
+
+    def database_name(self, layer: str) -> str:
+        if layer not in LAYERS:
+            raise ValueError(f"unknown layer {layer!r}, expected one of {LAYERS}")
+        return layer
 
     def server_url(self) -> str:
         """Connection URL with no database selected (for CREATE DATABASE)."""
@@ -81,11 +85,11 @@ class MySQLSettings:
             f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/?charset=utf8mb4"
         )
 
-    def database_url(self) -> str:
-        """Connection URL for the single medallion database (`medalhao`)."""
+    def layer_url(self, layer: str) -> str:
+        db = self.database_name(layer)
         return (
             f"mysql+pymysql://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.database}?charset=utf8mb4"
+            f"@{self.host}:{self.port}/{db}?charset=utf8mb4"
         )
 
 

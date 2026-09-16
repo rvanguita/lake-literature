@@ -13,9 +13,8 @@ differences, lossy PDF filename matching) see [`CLAUDE.md`](CLAUDE.md).
 
 ## What it does
 
-Two publisher exports are consolidated through a **medallion architecture** — five stages, four of them
-backed by SQLAlchemy models sharing a single MySQL database (`medalhao`), each layer's tables kept apart by
-name (see [`docs/SDD.md`](docs/SDD.md)):
+Two publisher exports are consolidated through a **medallion architecture** — five stages, four of them each
+backed by their own MySQL database and built with SQLAlchemy:
 
 ```
 raw       verbatim ingestion of every source file (CSV rows, BibTeX entries, PDF inventory)
@@ -27,7 +26,7 @@ silver    deduplicated by normalized DOI, quality-flagged, linked to PDFs by fuz
 gold      curated articles + RAG-ready text chunks (abstract chunks for everything, full-text
           chunks for the subset with a linked PDF)
    ↓
-embed     fills lit_chunks.embedding for every chunk, entirely locally via fastembed (ONNX
+embed     fills gold.lit_chunks.embedding for every chunk, entirely locally via fastembed (ONNX
           runtime, BAAI/bge-small-en-v1.5) — no API key, no GPU required
 ```
 
@@ -76,7 +75,7 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.13) and access to a MySQL se
 
 ```bash
 uv sync                                     # create/refresh .venv from uv.lock
-cp .env.example .env                        # fill in MYSQL_HOST/PORT/USER/PASSWORD/DATABASE
+cp .env.example .env                        # fill in MYSQL_HOST/PORT/USER/PASSWORD
 
 uv run lake-literature --stage all         # run the full pipeline (raw -> bronze -> silver -> gold -> embed)
 uv run lake-literature --stage embed       # or run just the embedding stage on its own
@@ -142,7 +141,7 @@ main.py                  root Streamlit entry point (`import lake_literature.das
 
 ## Status
 
-`lit_chunks.embedding` is populated by the `embed` stage (`transform/embeddings.py`, `BAAI/bge-small-en-v1.5`
+`gold.lit_chunks.embedding` is populated by the `embed` stage (`transform/embeddings.py`, `BAAI/bge-small-en-v1.5`
 via `fastembed`) and is idempotent — re-running it only embeds chunks still missing a vector, so it's safe to
 call after every `--stage gold` run. The dashboard's "Qualidade e RAG" page has a gauge showing embedding
 coverage and a button to trigger the stage directly. That same page's search box now runs real vector

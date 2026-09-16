@@ -1,12 +1,9 @@
 """Shared fixtures: one in-memory SQLite session per medallion layer.
 
-In the real system all four layers share one MySQL database (`medalhao`,
-see `src/lake_literature/db/engines.py`), but each layer still has its own
-SQLAlchemy `Base` (`src/lake_literature/db/*_models.py`) with its own table
-names, so a separate in-memory SQLite engine per layer remains a faithful,
-dependency-free stand-in -- nothing in the transform code is MySQL-specific,
-and sessions are already passed around independently per layer in
-`pipeline.py`.
+Each layer is already an independent SQLAlchemy `Base`/database in the real
+system (see `src/lake_literature/db/*_models.py`), and nothing in the
+transform code is MySQL-specific, so a separate in-memory SQLite engine per
+layer is a faithful, dependency-free stand-in for the real MySQL databases.
 """
 
 from __future__ import annotations

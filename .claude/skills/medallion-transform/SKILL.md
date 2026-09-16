@@ -9,19 +9,19 @@ This is the authoring-side skill for the pipeline itself (`src/lake_literature/{
 and `pipeline.py`) — how to actually *run* it, locally or via Airflow, is the `pipeline-ops` skill instead.
 Dashboard code (`dashboard/`) has its own `streamlit-dashboard` skill.
 
-## One database, layer-prefixed/suffixed table names
+## One database per layer, same table names
 
-All four layers share a single MySQL database, `medalhao` (`MYSQL_DATABASE`), each with its own SQLAlchemy
-`Base` in `db/{raw,bronze,silver,gold}_models.py`. Because everything lives in one database, table names
-must be unique across layers: raw's tables (`lit_source_files`, `lit_config`, `lit_ieee_csv_rows`,
-`lit_bib_entries`, `lit_pdf_files`) and gold's `lit_chunks` were already unique and keep their plain names;
-the three `Article` models collide on the obvious name, so they're disambiguated with a layer suffix —
-`lit_articles_bronze`, `lit_articles_silver`, `lit_articles_gold` — each with a different, layer-appropriate
-field set. Don't assume a column on one layer's `Article` model exists on another's.
+Four independent MySQL databases — `raw`, `bronze`, `silver`, `gold`, named plainly after the layer (no
+prefix) — each with its own SQLAlchemy `Base` in `db/{raw,bronze,silver,gold}_models.py`. Table names repeat
+across layers (`lit_articles`, etc.) but each layer's `Article` model has a different, layer-appropriate
+field set — don't assume a column on one layer's model exists on another's.
+
+**These databases are shared with unrelated projects on the same MySQL server** (`raw`/`bronze`/`silver`
+already had other tables before this pipeline existed, e.g. `fastf1_results`, `personal_expenses`). Every
+table this project owns is `lit_`-prefixed; never touch a table in these databases that isn't.
 
 `db/engines.py`'s `get_engine(layer)` (`@cache`d) / `get_session(layer)` is the one access point — always go
-through it, never construct an engine/session directly. `layer` is still validated against `LAYERS` for
-typo-safety even though every layer now resolves to the same shared engine/database.
+through it, never construct an engine/session directly.
 
 ## Adding a new column
 
