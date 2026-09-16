@@ -9,6 +9,8 @@ For the full product rationale see [`docs/PRD.md`](docs/PRD.md); for the system 
 [`docs/SDD.md`](docs/SDD.md); for the exact quirks of the source data (BibTeX parsing gotchas, DOI format
 differences, lossy PDF filename matching) see [`CLAUDE.md`](CLAUDE.md).
 
+![Arquitetura do pipeline: IEEE Xplore e Elsevier/ScienceDirect fluindo pelas camadas raw, bronze, silver, gold e embed, orquestradas pelo Apache Airflow, alimentando o dashboard Streamlit](docs/images/architecture.svg)
+
 ## What it does
 
 Two publisher exports are consolidated through a **medallion architecture** — five stages, four of them each
