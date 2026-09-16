@@ -160,34 +160,39 @@ def topn_hbar(
     return fig
 
 
-def lorenz_chart(lorenz_df: pd.DataFrame) -> go.Figure:
+def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
     """Lorenz curve: cumulative share of output vs. cumulative share of authors.
 
-    `lorenz_df` must have the shape from `analytics.lorenz_curve` (columns
-    `share_of_authors`, `share_of_output`). The perfect-equality diagonal is a
-    second real trace, not a reference line -- consistent with the "Total is a
+    `series` maps a source key ("ieee"/"elsevier"/"total") to a DataFrame with
+    the shape from `analytics.lorenz_curve` (columns `share_of_authors`,
+    `share_of_output`) -- one real line trace per key, colored via
+    `SOURCE_COLORS`/`SOURCE_LABELS` ("ieee"/"elsevier") or `TOTAL_COLOR`/
+    `TOTAL_LABEL` (anything else, i.e. "total"), matching `source_lines`'s
+    3-real-series style. The perfect-equality diagonal is always a second kind
+    of real trace, not a reference line -- consistent with the "Total is a
     real series" rule, generalized to this chart's own benchmark.
     """
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=lorenz_df["share_of_authors"],
-            y=lorenz_df["share_of_output"],
-            name="Distribuição observada",
-            mode="lines+markers",
-            line=dict(color=CATEGORICAL_PALETTE[0], width=2.5),
-            marker=dict(size=4),
-            fill="tozeroy",
-            fillcolor=hex_to_rgba(CATEGORICAL_PALETTE[0], 0.15),
+    for key, lorenz_df in series.items():
+        color = SOURCE_COLORS.get(key, TOTAL_COLOR)
+        name = SOURCE_LABELS.get(key, TOTAL_LABEL)
+        fig.add_trace(
+            go.Scatter(
+                x=lorenz_df["share_of_authors"],
+                y=lorenz_df["share_of_output"],
+                name=name,
+                mode="lines+markers",
+                line=dict(color=color, width=2.5),
+                marker=dict(size=4),
+            )
         )
-    )
     fig.add_trace(
         go.Scatter(
             x=[0, 1],
             y=[0, 1],
             name="Equidade perfeita",
             mode="lines",
-            line=dict(color=TOTAL_COLOR, width=2, dash="dash"),
+            line=dict(color=OTHER_COLOR, width=2, dash="dash"),
         )
     )
     fig.update_layout(

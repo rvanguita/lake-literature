@@ -237,6 +237,26 @@ def _emerging_vs_established(author_rows: pd.DataFrame) -> None:
     )
 
 
+def _correlation_by_source(author_rows: pd.DataFrame) -> pd.DataFrame:
+    """Pearson/Spearman/N for IEEE, Elsevier, and Total, as one small table."""
+    sources: list[tuple[str, str | None]] = [("Total", None)]
+    if "source" in author_rows.columns:
+        sources = [("IEEE", "ieee"), ("Elsevier", "elsevier"), *sources]
+    rows = []
+    for label, key in sources:
+        subset = author_rows[author_rows["source"] == key] if key else author_rows
+        stats = output_impact_correlation(subset, "citation_count")
+        rows.append(
+            {
+                "Base": label,
+                "Pearson": stats["pearson"],
+                "Spearman": stats["spearman"],
+                "Autores": stats["n"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
     st.subheader("📊 Volume × impacto")
     if "citation_count" not in author_rows.columns:
@@ -253,13 +273,7 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
         st.info("Sem dados de citação suficientes para autores com ≥2 artigos.")
         return
 
-    metric_row(
-        [
-            ("Correlação de Pearson", f"{stats['pearson']:.2f}", None),
-            ("Correlação de Spearman", f"{stats['spearman']:.2f}", None),
-            ("Autores considerados", f"{stats['n']:,}", None),
-        ]
-    )
+    st.dataframe(_correlation_by_source(author_rows), hide_index=True, width="stretch")
     fig = px.scatter(
         by_author.reset_index(),
         x="articles",
@@ -290,9 +304,9 @@ def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
 
     st.caption(
         "Uma linha por autor canonicalizado (ver aviso no topo da página), uma coluna por ano de "
-        "publicação válido, mais o total histórico. Contagem por DOI distinto quando disponível, "
-        "para não contar duas vezes um artigo em coautoria assinado pelo mesmo autor. "
-        "**Ordenado do maior para o menor total.**"
+        "publicação válido, mais `total`, `ieee_total` e `elsevier_total` (quebra do total histórico "
+        "por base). Contagem por DOI distinto quando disponível, para não contar duas vezes um artigo "
+        "em coautoria assinado pelo mesmo autor. **Ordenado do maior para o menor total.**"
     )
     st.dataframe(matrix, hide_index=True, width="stretch")
     st.download_button(
@@ -305,32 +319,44 @@ def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     return matrix
 
 
+def _gini_interpretation(gini: float) -> str:
+    if gini < 0.3:
+        return "baixa concentração — a produção é relativamente distribuída entre os autores"
+    if gini > 0.6:
+        return "alta concentração — a produção está dominada por poucos autores muito prolíficos"
+    return "concentração moderada"
+
+
 def _concentration_analysis(matrix: pd.DataFrame) -> None:
     st.subheader("📐 Concentração da produção (Gini / curva de Lorenz)")
     if matrix.empty:
         st.info("Sem dados suficientes para esta análise.")
         return
 
-    gini = gini_coefficient(matrix["total"])
-    if gini < 0.3:
-        interpretation = (
-            "baixa concentração — a produção é relativamente distribuída entre os autores"
-        )
-    elif gini > 0.6:
-        interpretation = (
-            "alta concentração — a produção está dominada por poucos autores muito prolíficos"
-        )
-    else:
-        interpretation = "concentração moderada"
-    metric_row([("📐 Índice de Gini", f"{gini:.2f}", interpretation)])
+    gini_ieee = gini_coefficient(matrix["ieee_total"])
+    gini_elsevier = gini_coefficient(matrix["elsevier_total"])
+    gini_total = gini_coefficient(matrix["total"])
+    metric_row(
+        [
+            ("📐 Gini — IEEE", f"{gini_ieee:.2f}", _gini_interpretation(gini_ieee)),
+            ("📐 Gini — Elsevier", f"{gini_elsevier:.2f}", _gini_interpretation(gini_elsevier)),
+            ("📐 Gini — Total", f"{gini_total:.2f}", _gini_interpretation(gini_total)),
+        ]
+    )
 
-    lorenz_df = lorenz_curve(matrix["total"])
-    fig = lorenz_chart(lorenz_df)
+    fig = lorenz_chart(
+        {
+            "ieee": lorenz_curve(matrix["ieee_total"]),
+            "elsevier": lorenz_curve(matrix["elsevier_total"]),
+            "total": lorenz_curve(matrix["total"]),
+        }
+    )
     render_chart(
         fig,
-        caption="Índice de Gini calculado sobre o total histórico por autor (0 = todos publicam o "
-        "mesmo tanto, 1 = um único autor concentra toda a produção). Quanto mais a curva observada se "
-        "afasta da diagonal de equidade perfeita, mais concentrada é a produção do corpus.",
+        caption="Índice de Gini calculado sobre o total histórico por autor, separado por base (0 = "
+        "todos publicam o mesmo tanto, 1 = um único autor concentra toda a produção). Quanto mais uma "
+        "curva observada se afasta da diagonal de equidade perfeita, mais concentrada é a produção "
+        "naquela base.",
     )
 
 

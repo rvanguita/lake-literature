@@ -224,8 +224,11 @@ def author_display_name(names: pd.Series) -> str:
     return max(names.unique(), key=len)
 
 
+_MATRIX_SUMMARY_COLS = ("total", "ieee_total", "elsevier_total")
+
+
 def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per canonical author, one column per valid year, plus `total`.
+    """One row per canonical author, one column per valid year, plus source totals.
 
     Explodes `authors`, folds names via `canonical_author` (see its docstring
     for the "initial surname" identity-merge caveat -- any page showing this
@@ -235,17 +238,22 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     a co-authored paper). Sorted descending by `total` per the page's "highest
     to lowest" requirement. Years outside `valid_years`' plausible window are
     dropped before pivoting, same as every other year-based aggregation here.
+
+    `ieee_total`/`elsevier_total` break `total` down by source (0 when a
+    `source` column isn't present), using the same distinct-DOI counting rule
+    as the year columns -- the "3 real series" convention this dashboard uses
+    everywhere else (see `source_counts_by`).
     """
     exploded = explode_authors(df)
     if exploded.empty:
-        return pd.DataFrame(columns=["author", "total"])
+        return pd.DataFrame(columns=["author", *_MATRIX_SUMMARY_COLS])
 
     exploded["author_key"] = exploded["author"].apply(canonical_author)
     exploded = exploded[exploded["author_key"] != ""]
     exploded["year"] = valid_years(exploded)
     exploded = exploded.dropna(subset=["year"]).astype({"year": int})
     if exploded.empty:
-        return pd.DataFrame(columns=["author", "total"])
+        return pd.DataFrame(columns=["author", *_MATRIX_SUMMARY_COLS])
 
     display_names = exploded.groupby("author_key")["author"].apply(author_display_name)
     exploded["author_display"] = exploded["author_key"].map(display_names)
@@ -260,10 +268,26 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     )
     pivot.columns = [str(int(c)) for c in pivot.columns]
     pivot["total"] = pivot.sum(axis=1)
+
+    if "source" in exploded.columns:
+        src_pivot = (
+            exploded.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in src_pivot.columns:
+                src_pivot[src] = 0
+        pivot["ieee_total"] = src_pivot["ieee"].reindex(pivot.index, fill_value=0).astype(int)
+        pivot["elsevier_total"] = (
+            src_pivot["elsevier"].reindex(pivot.index, fill_value=0).astype(int)
+        )
+    else:
+        pivot["ieee_total"] = 0
+        pivot["elsevier_total"] = 0
+
     pivot = pivot.sort_values("total", ascending=False)
     pivot.index.name = "author"
-    year_cols = sorted((c for c in pivot.columns if c != "total"), key=int)
-    return pivot.reset_index()[["author", "total", *year_cols]]
+    year_cols = sorted((c for c in pivot.columns if c not in _MATRIX_SUMMARY_COLS), key=int)
+    return pivot.reset_index()[["author", *_MATRIX_SUMMARY_COLS, *year_cols]]
 
 
 def gini_coefficient(values: pd.Series) -> float:
@@ -331,7 +355,7 @@ def author_productivity_trend(matrix: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if matrix.empty:
         return pd.DataFrame(columns=columns)
 
-    year_cols = [c for c in matrix.columns if c not in ("author", "total")]
+    year_cols = [c for c in matrix.columns if c not in ("author", *_MATRIX_SUMMARY_COLS)]
     top = matrix.sort_values("total", ascending=False).head(top_n)
 
     rows = []

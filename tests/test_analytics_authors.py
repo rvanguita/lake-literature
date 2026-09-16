@@ -37,7 +37,9 @@ def test_author_year_matrix_sorted_descending_by_total():
 
 def test_author_year_matrix_year_columns_and_totals_consistent():
     matrix = author_year_matrix(_articles_df())
-    year_cols = [c for c in matrix.columns if c not in ("author", "total")]
+    year_cols = [
+        c for c in matrix.columns if c not in ("author", "total", "ieee_total", "elsevier_total")
+    ]
 
     assert year_cols == sorted(year_cols)
     for _, row in matrix.iterrows():
@@ -48,6 +50,36 @@ def test_author_year_matrix_empty_when_no_authors():
     empty = pd.DataFrame({"year": [2020, 2021]})
     matrix = author_year_matrix(empty)
     assert matrix.empty
+
+
+def test_author_year_matrix_splits_ieee_and_elsevier_totals():
+    df = pd.DataFrame(
+        [
+            {"authors": ["J. Liu"], "year": 2020, "doi": "10.1/1", "source": "ieee"},
+            {"authors": ["J. Liu"], "year": 2021, "doi": "10.1/2", "source": "ieee"},
+            {"authors": ["Junyong Liu"], "year": 2022, "doi": "10.1/3", "source": "elsevier"},
+            {"authors": ["B. Costa"], "year": 2020, "doi": "10.1/4", "source": "elsevier"},
+        ]
+    )
+    matrix = author_year_matrix(df).set_index("author")
+
+    # "J. Liu" (ieee) and "Junyong Liu" (elsevier) fold to the same canonical
+    # author -- total must be the sum of both sources' contributions.
+    liu = matrix.loc["Junyong Liu"]
+    assert liu["ieee_total"] == 2
+    assert liu["elsevier_total"] == 1
+    assert liu["total"] == liu["ieee_total"] + liu["elsevier_total"] == 3
+
+    costa = matrix.loc["B. Costa"]
+    assert costa["ieee_total"] == 0
+    assert costa["elsevier_total"] == 1
+    assert costa["total"] == 1
+
+
+def test_author_year_matrix_source_columns_default_to_zero_without_source():
+    matrix = author_year_matrix(_articles_df())
+    assert (matrix["ieee_total"] == 0).all()
+    assert (matrix["elsevier_total"] == 0).all()
 
 
 def test_gini_coefficient_perfect_equality_is_zero():
