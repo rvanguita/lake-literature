@@ -101,6 +101,8 @@ Isso ativa dois checks em todo `git commit`:
 - **gitleaks** — varre o diff staged em busca de segredos (senhas, API keys, tokens, private keys) e bloqueia o commit se encontrar algo.
 - **block-docs-on-main** (`scripts/git-hooks/check-docs-branch.sh`) — bloqueia commits que só tocam documentação (`docs/`, `*.md`, `README*`, `CLAUDE.md`) quando feitos direto na `main`, pedindo para criar uma branch (`git checkout -b docs/<assunto>`) antes.
 
+Se você usa o Claude Code neste projeto, o snapshot automático de sessão (hook global `auto-pr.sh`, que commita/pusha com `--no-verify` ao final de cada turno) também roda sua própria varredura de segredo antes de commitar — se encontrar algo, aborta sem commitar nem dar push, para que os dois caminhos (commit manual e automático) fiquem cobertos.
+
 ## Project layout
 
 ```
