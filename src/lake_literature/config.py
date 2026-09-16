@@ -49,6 +49,13 @@ IEEE_DIR = DATA_DIR / "ieee"
 ELSEVIER_DIR = DATA_DIR / "elsevier"
 ARTICLES_DIR = DATA_DIR / "articles"
 
+# Official CAPES/Qualis journal-classification export (2017-2020 quadriênio, all
+# evaluation areas) -- see dashboard/qualis.py. Not checked into git (see
+# .gitignore): large, externally-sourced reference data, not project-authored.
+CAPES_QUALIS_XLSX = (
+    DATA_DIR / "classificações_publicadas_todas_as_areas_avaliacao1783453567318.xlsx"
+)
+
 
 @dataclass(frozen=True)
 class MySQLSettings:

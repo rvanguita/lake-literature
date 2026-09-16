@@ -8,8 +8,19 @@ import plotly.express as px
 import streamlit as st
 
 from lake_literature.dashboard import loaders
-from lake_literature.dashboard.analytics import explode_keywords, valid_years
-from lake_literature.dashboard.charts import stacked_area, topn_hbar
+from lake_literature.dashboard.analytics import (
+    cumulative_by_source,
+    explode_keywords,
+    source_counts_by,
+    valid_years,
+)
+from lake_literature.dashboard.charts import (
+    source_bars,
+    source_lines,
+    source_topn_hbar,
+    stacked_area,
+    topn_hbar,
+)
 from lake_literature.dashboard.components import (
     article_table,
     metric_row,
@@ -17,6 +28,7 @@ from lake_literature.dashboard.components import (
     render_chart,
     require_columns,
 )
+from lake_literature.dashboard.qualis import MATCH_THRESHOLD, NOT_CLASSIFIED, QUALIS_AREA
 from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, TREND_DOWN_COLOR, TREND_UP_COLOR
 
 TOP_KEYWORDS_TREND = 12
@@ -38,6 +50,9 @@ def render() -> None:
         _top_venues(articles_df)
     with col_keywords:
         _top_keywords(articles_df)
+
+    st.divider()
+    _capes_qualis_section(articles_df)
 
     if not require_columns(articles_df, ["keywords"]):
         return
@@ -335,3 +350,92 @@ def _first_appearance(kw_year: pd.DataFrame) -> None:
         "para ver o termo; os rótulos fixos destacam apenas os pontos mais extremos (maior volume e estreia "
         "mais recente), para não sobrepor os demais.",
     )
+
+
+def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
+    st.subheader("🎓 Classificação CAPES/Qualis")
+    if not require_columns(articles_df, ["venue"]) or not articles_df["venue"].notna().any():
+        return
+
+    venues = sorted(articles_df["venue"].dropna().unique())
+    match_df = loaders.venue_qualis_map(tuple(venues))
+    match_df["estrato"] = match_df["estrato"].fillna(NOT_CLASSIFIED)
+
+    counts = articles_df["venue"].value_counts()
+    match_df["articles"] = match_df["venue"].map(counts).fillna(0).astype(int)
+    match_df = match_df.sort_values("articles", ascending=False)
+
+    n_classified = int((match_df["estrato"] != NOT_CLASSIFIED).sum())
+    a1_venues = match_df.loc[match_df["estrato"] == "A1", "venue"]
+    a1_articles_df = articles_df[articles_df["venue"].isin(a1_venues)]
+    pct_a1 = (len(a1_articles_df) / len(articles_df) * 100) if len(articles_df) else 0.0
+
+    metric_row(
+        [
+            ("📚 Periódicos classificados", f"{n_classified}/{len(match_df)}", None),
+            ("🥇 Periódicos A1", f"{len(a1_venues)}", None),
+            ("📄 Artigos em periódicos A1", f"{len(a1_articles_df):,}", f"{pct_a1:.1f}% do corpus"),
+        ]
+    )
+
+    st.caption(
+        f"Classificação oficial CAPES/Qualis (quadriênio 2017-2020, área **{QUALIS_AREA}** -- a "
+        "última avaliação por periódico; a partir de 2025-2028 a CAPES passa a avaliar por artigo, não "
+        "mais por veículo). Cada periódico do corpus é casado com o título de referência por "
+        f"similaridade textual (corte de {MATCH_THRESHOLD:.0f}%), já que grafias variam entre bases "
+        "(ex.: `&` vs. `and`, sufixos `(Print)`/`(Online)`). Um periódico não encontrado com confiança "
+        f'suficiente aparece como "{NOT_CLASSIFIED}" -- nunca como uma nota adivinhada.'
+    )
+    st.dataframe(
+        match_df.rename(
+            columns={
+                "venue": "Periódico (corpus)",
+                "matched_title": "Título casado (CAPES)",
+                "estrato": "Estrato",
+                "score": "Similaridade (%)",
+                "articles": "Artigos",
+            }
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+
+    if a1_articles_df.empty:
+        st.info("Nenhum artigo em periódico classificado A1 nesta camada/filtro.")
+        return
+
+    st.markdown("#### Análise -- somente periódicos A1")
+    col_year, col_cum = st.columns(2)
+    with col_year:
+        years_df = a1_articles_df.copy()
+        years_df["year"] = valid_years(years_df)
+        years_df = years_df.dropna(subset=["year"]).astype({"year": int})
+        by_year = source_counts_by(years_df, "year").sort_values("year")
+        if by_year.empty:
+            st.info("Sem anos válidos para este gráfico.")
+        else:
+            fig = source_bars(by_year, "year", total_line=True)
+            fig.update_layout(
+                hovermode="x unified", xaxis_title="Ano de publicação", yaxis_title="Artigos"
+            )
+            render_chart(fig, caption="Volume anual de artigos publicados em periódicos A1.")
+    with col_cum:
+        cum = cumulative_by_source(a1_articles_df)
+        if cum.empty:
+            st.info("Sem anos válidos para o acumulado.")
+        else:
+            fig = source_lines(
+                cum, "year", title="Acumulado em periódicos A1", y_title="Artigos acumulados"
+            )
+            fig.update_layout(xaxis_title="Ano de publicação")
+            render_chart(
+                fig,
+                caption=f"Ao final do período, {int(cum['total'].iloc[-1]):,} artigos acumulados em "
+                "periódicos A1.",
+            )
+
+    top_a1 = (
+        source_counts_by(a1_articles_df, "venue").sort_values("total", ascending=False).head(15)
+    )
+    fig = source_topn_hbar(top_a1, "venue", x_title="Artigos")
+    render_chart(fig, caption="Periódicos A1 mais publicados pelo corpus.")

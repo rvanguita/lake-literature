@@ -27,6 +27,7 @@ data/articles/
 data/ieee/
 data/sciencedirect.zip
 data/enrichment_cache.json
+data/classificações_publicadas_todas_as_areas_avaliacao*.xlsx
 
 # Airflow local runtime (host runs, outside Docker's named volumes)
 airflow/airflow.db
