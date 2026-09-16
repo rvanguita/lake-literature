@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- title -->
+  <text x="500" y="24" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">lake-literature: bibliographic medallion pipeline</text>
+
+  <!-- sources -->
+  <g>
+    <rect x="90" y="42" width="220" height="46" rx="8" fill="#eef2f7" stroke="#334155" stroke-width="1.5"/>
+    <text x="200" y="70" text-anchor="middle" font-size="14" fill="#1e293b">IEEE Xplore</text>
+
+    <rect x="690" y="42" width="220" height="46" rx="8" fill="#eef2f7" stroke="#334155" stroke-width="1.5"/>
+    <text x="800" y="65" text-anchor="middle" font-size="14" fill="#1e293b">Elsevier /</text>
+    <text x="800" y="80" text-anchor="middle" font-size="14" fill="#1e293b">ScienceDirect</text>
+  </g>
+
+  <!-- arrows from sources down into pipeline -->
+  <path d="M200,88 L200,116 L120,116 L120,130" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M800,88 L800,116 L120,116" fill="none" stroke="#475569" stroke-width="1.5"/>
+
+  <!-- pipeline stages -->
+  <g font-size="13">
+    <!-- raw -->
+    <rect x="45" y="130" width="150" height="76" rx="8" fill="#e2f0e5" stroke="#166534" stroke-width="1.5"/>
+    <text x="120" y="152" text-anchor="middle" font-weight="700" fill="#14532d">raw</text>
+    <text x="120" y="170" text-anchor="middle" fill="#14532d">verbatim ingestion</text>
+    <text x="120" y="185" text-anchor="middle" fill="#14532d">CSV, .bib, PDF</text>
+    <text x="120" y="200" text-anchor="middle" fill="#14532d">inventory</text>
+
+    <!-- bronze -->
+    <rect x="235" y="130" width="150" height="76" rx="8" fill="#f4e6d7" stroke="#92400e" stroke-width="1.5"/>
+    <text x="310" y="152" text-anchor="middle" font-weight="700" fill="#78350f">bronze</text>
+    <text x="310" y="170" text-anchor="middle" fill="#78350f">IEEE + Elsevier</text>
+    <text x="310" y="185" text-anchor="middle" fill="#78350f">unioned into one</text>
+    <text x="310" y="200" text-anchor="middle" fill="#78350f">article schema</text>
+
+    <!-- silver -->
+    <rect x="425" y="130" width="150" height="76" rx="8" fill="#e2e8f4" stroke="#1e3a8a" stroke-width="1.5"/>
+    <text x="500" y="152" text-anchor="middle" font-weight="700" fill="#1e3a8a">silver</text>
+    <text x="500" y="170" text-anchor="middle" fill="#1e3a8a">dedup by DOI,</text>
+    <text x="500" y="185" text-anchor="middle" fill="#1e3a8a">quality-flagged,</text>
+    <text x="500" y="200" text-anchor="middle" fill="#1e3a8a">linked to PDFs</text>
+
+    <!-- gold -->
+    <rect x="615" y="130" width="150" height="76" rx="8" fill="#f6e8ee" stroke="#9d174d" stroke-width="1.5"/>
+    <text x="690" y="152" text-anchor="middle" font-weight="700" fill="#831843">gold</text>
+    <text x="690" y="170" text-anchor="middle" fill="#831843">curated articles</text>
+    <text x="690" y="185" text-anchor="middle" fill="#831843">+ RAG-ready</text>
+    <text x="690" y="200" text-anchor="middle" fill="#831843">text chunks</text>
+
+    <!-- embed -->
+    <rect x="805" y="130" width="150" height="76" rx="8" fill="#ede7f6" stroke="#4c1d95" stroke-width="1.5"/>
+    <text x="880" y="152" text-anchor="middle" font-weight="700" fill="#4c1d95">embed</text>
+    <text x="880" y="170" text-anchor="middle" fill="#4c1d95">local ONNX vectors</text>
+    <text x="880" y="185" text-anchor="middle" fill="#4c1d95">(fastembed,</text>
+    <text x="880" y="200" text-anchor="middle" fill="#4c1d95">bge-small-en)</text>
+  </g>
+
+  <!-- arrows between stages -->
+  <path d="M195,168 L235,168" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M385,168 L425,168" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M575,168 L615,168" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M765,168 L805,168" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- orchestration bracket -->
+  <path d="M45,222 L955,222" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <path d="M120,206 L120,222 M310,206 L310,222 M500,206 L500,222 M690,206 L690,222 M880,206 L880,222"
+        fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="500" y="242" text-anchor="middle" font-size="13" fill="#475569">orchestrated by Apache Airflow — one DAG per stage, chained end-to-end</text>
+
+  <!-- arrow down to dashboard -->
+  <path d="M500,250 L500,280" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- dashboard -->
+  <rect x="300" y="288" width="400" height="70" rx="8" fill="#fff7e6" stroke="#92400e" stroke-width="1.5"/>
+  <text x="500" y="312" text-anchor="middle" font-size="15" font-weight="700" fill="#78350f">Streamlit dashboard</text>
+  <text x="500" y="332" text-anchor="middle" font-size="13" fill="#78350f">corpus stats, RAG vector search, per-layer</text>
+  <text x="500" y="348" text-anchor="middle" font-size="13" fill="#78350f">counts, and buttons to trigger any stage</text>
+</svg>
