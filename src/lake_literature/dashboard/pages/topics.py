@@ -9,6 +9,7 @@ import streamlit as st
 
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
+    cumulative_by_category,
     cumulative_by_source,
     explode_keywords,
     source_counts_by,
@@ -29,7 +30,12 @@ from lake_literature.dashboard.components import (
     require_columns,
 )
 from lake_literature.dashboard.qualis import MATCH_THRESHOLD, NOT_CLASSIFIED, QUALIS_AREA
-from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, TREND_DOWN_COLOR, TREND_UP_COLOR
+from lake_literature.dashboard.theme import (
+    CATEGORICAL_PALETTE,
+    TREND_DOWN_COLOR,
+    TREND_UP_COLOR,
+    venue_color_map,
+)
 
 TOP_KEYWORDS_TREND = 12
 TREND_MIN_YEAR = 2010
@@ -360,6 +366,11 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
     venues = sorted(articles_df["venue"].dropna().unique())
     match_df = loaders.venue_qualis_map(tuple(venues))
     match_df["estrato"] = match_df["estrato"].fillna(NOT_CLASSIFIED)
+    # A raw None in a string column renders as literal "undefined" in Streamlit's
+    # dataframe grid (pandas' Arrow-backed string dtype stores it as a genuine
+    # null, not NaN) -- always give it an explicit placeholder instead.
+    match_df["matched_title"] = match_df["matched_title"].fillna("—")
+    match_df["score"] = match_df["score"].apply(lambda s: f"{s:.0f}" if pd.notna(s) else "—")
 
     counts = articles_df["venue"].value_counts()
     match_df["articles"] = match_df["venue"].map(counts).fillna(0).astype(int)
@@ -439,3 +450,37 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
     )
     fig = source_topn_hbar(top_a1, "venue", x_title="Artigos")
     render_chart(fig, caption="Periódicos A1 mais publicados pelo corpus.")
+
+    st.markdown("#### Acumulado por classificação")
+    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
+    with_estrato = articles_df.copy()
+    with_estrato["estrato"] = with_estrato["venue"].map(venue_to_estrato)
+    cum_by_estrato = cumulative_by_category(with_estrato, "estrato", top_n=10)
+    if cum_by_estrato.empty:
+        st.info("Sem anos válidos para o acumulado por classificação.")
+        return
+
+    estrato_order = [
+        e
+        for e in ("A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "C", NOT_CLASSIFIED)
+        if e in cum_by_estrato["estrato"].unique()
+    ]
+    fig = stacked_area(
+        cum_by_estrato,
+        x="year",
+        y="cumulative",
+        color="estrato",
+        color_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
+        category_orders={"estrato": estrato_order},
+        title="Artigos acumulados por classificação CAPES/Qualis",
+    )
+    fig.update_traces(
+        hovertemplate="Ano %{x}<br>%{data.name}: %{y:,.0f} artigos acumulados<extra></extra>"
+    )
+    fig.update_layout(xaxis_title="Ano de publicação", yaxis_title="Artigos acumulados")
+    render_chart(
+        fig,
+        caption="Composição acumulada do corpus por estrato CAPES/Qualis (área "
+        f"{QUALIS_AREA}). Periódicos sem classificação confiável ficam em "
+        f'"{NOT_CLASSIFIED}", não misturados a nenhum estrato real.',
+    )

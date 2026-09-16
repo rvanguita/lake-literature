@@ -77,38 +77,45 @@ def cumulative_by_source(df: pd.DataFrame) -> pd.DataFrame:
     return counts.reset_index(drop=True)
 
 
-def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total") -> pd.DataFrame:
-    """Cumulative publications per year for the top venues (+ an Outros bucket).
+def cumulative_by_category(
+    df: pd.DataFrame, category_col: str, top_n: int = 10, scope: str = "total"
+) -> pd.DataFrame:
+    """Cumulative publications per year for the top values of `category_col` (+ an Outros bucket).
 
     `scope` restricts the underlying rows to "ieee", "elsevier", or "total"
-    (all rows) before ranking venues and accumulating -- lets one chart answer
-    "top venues overall" vs. "top venues within IEEE" without recomputing.
+    (all rows) before ranking categories and accumulating -- lets one chart
+    answer "top X overall" vs. "top X within IEEE" without recomputing.
     """
     working = df.copy()
     if scope in ("ieee", "elsevier") and "source" in working.columns:
         working = working[working["source"] == scope]
     working["year"] = valid_years(working)
-    working = working.dropna(subset=["year", "venue"])
+    working = working.dropna(subset=["year", category_col])
     if working.empty:
-        return pd.DataFrame(columns=["year", "venue", "cumulative"])
+        return pd.DataFrame(columns=["year", category_col, "cumulative"])
     working["year"] = working["year"].astype(int)
 
-    top_venues = working["venue"].value_counts().head(top_n).index.tolist()
-    working["venue_bucket"] = working["venue"].where(
-        working["venue"].isin(top_venues), OTHERS_LABEL
+    top_values = working[category_col].value_counts().head(top_n).index.tolist()
+    working["_bucket"] = working[category_col].where(
+        working[category_col].isin(top_values), OTHERS_LABEL
     )
 
-    by_year_venue = working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
-    years = sorted(by_year_venue["year"].unique())
-    venues = list(by_year_venue["venue_bucket"].unique())
-    full_index = pd.MultiIndex.from_product([years, venues], names=["year", "venue_bucket"])
+    by_year_bucket = working.groupby(["year", "_bucket"]).size().rename("count").reset_index()
+    years = sorted(by_year_bucket["year"].unique())
+    buckets = list(by_year_bucket["_bucket"].unique())
+    full_index = pd.MultiIndex.from_product([years, buckets], names=["year", "_bucket"])
     filled = (
-        by_year_venue.set_index(["year", "venue_bucket"])["count"]
+        by_year_bucket.set_index(["year", "_bucket"])["count"]
         .reindex(full_index, fill_value=0)
         .reset_index()
     )
-    filled["cumulative"] = filled.groupby("venue_bucket")["count"].cumsum()
-    return filled.rename(columns={"venue_bucket": "venue"})
+    filled["cumulative"] = filled.groupby("_bucket")["count"].cumsum()
+    return filled.rename(columns={"_bucket": category_col})
+
+
+def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total") -> pd.DataFrame:
+    """Cumulative publications per year for the top venues (+ an Outros bucket)."""
+    return cumulative_by_category(df, "venue", top_n=top_n, scope=scope)
 
 
 def source_means(df: pd.DataFrame, col: str) -> dict[str, float | None]:

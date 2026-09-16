@@ -403,8 +403,8 @@ def _correlation_by_source(author_rows: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "Base": label,
-                "Pearson": stats["pearson"],
-                "Spearman": stats["spearman"],
+                "Pearson": f"{stats['pearson']:.2f}" if stats["pearson"] is not None else "—",
+                "Spearman": f"{stats['spearman']:.2f}" if stats["spearman"] is not None else "—",
                 "Autores": stats["n"],
             }
         )
