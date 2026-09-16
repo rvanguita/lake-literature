@@ -34,21 +34,22 @@ DOI is the only reliable cross-source identifier: stripping the `https://doi.org
 is what makes deduplication possible, because the two sources otherwise disagree on entry format, field names,
 and separators.
 
-A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every stage. Page labels
-in the running app are in Portuguese (`src/lake_literature/dashboard/app.py`); English translations are given
-below:
+A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every stage:
 
-| Page (as shown in the app) | What it shows |
+| Page | What it shows |
 |---|---|
-| Visão Geral *(Overview)* | headline corpus counts and composition |
-| Produção ao Longo do Tempo *(Output Over Time)* | publication trends by year, IEEE vs. Elsevier |
-| Tópicos e Periódicos *(Topics & Venues)* | keyword statistics with an interactive filter/explorer, venue breakdown |
-| Destaques e Impacto *(Highlights & Impact)* | citation distribution, most-cited/most-relevant articles |
-| Pesquisadores *(Researchers)* | author-level stats and collaboration view |
-| Tendências & Previsão *(Trends & Forecast)* | forecasting of publication/topic trends |
-| Camadas & Pipeline *(Layers & Pipeline)* | per-layer record counts and pipeline run status, with buttons to trigger a stage |
-| Qualidade e RAG *(Quality & RAG)* | data-quality flags plus RAG-chunk/embedding-readiness gauge, with a button to run the `embed` stage directly |
-| Configuração da Busca *(Search Configuration)* | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
+| Overview | headline corpus counts and composition |
+| Output Over Time | publication trends by year, IEEE vs. Elsevier |
+| Topics & Venues | keyword statistics with an interactive filter/explorer, venue breakdown |
+| Highlights & Impact | citation distribution, most-cited/most-relevant articles |
+| Researchers | author-level stats and collaboration view |
+| Trends & Forecast | forecasting of publication/topic trends |
+| Layers & Pipeline | per-layer record counts and pipeline run status, with buttons to trigger a stage |
+| Quality & RAG | data-quality flags plus RAG-chunk/embedding-readiness gauge, with a button to run the `embed` stage directly |
+| Search Configuration | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
+
+> Note: the page labels in the running app (`src/lake_literature/dashboard/app.py`) are currently in
+> Portuguese; the table above uses their English meaning.
 
 Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
 (`lake_literature_raw/bronze/silver/gold/embed`, defined in `airflow/dags/lake_literature_dags.py`) plus a
