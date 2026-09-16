@@ -17,6 +17,8 @@ already uses for PDF-to-title matching, reusing its `normalize_title`.
 
 from __future__ import annotations
 
+import warnings
+
 import pandas as pd
 from rapidfuzz import fuzz, process
 
@@ -40,7 +42,17 @@ def load_qualis_reference(path=None) -> pd.DataFrame:
     xlsx file -- not unit tested, same as this project's other raw-file loaders.
     """
     xlsx_path = path or CAPES_QUALIS_XLSX
-    df = pd.read_excel(xlsx_path, sheet_name="RelatorioQualis")
+    with warnings.catch_warnings():
+        # The source workbook has no explicit default cell style; openpyxl
+        # substitutes its own and warns about it, but this never affects the
+        # data actually read -- narrowly silenced so any other, genuinely
+        # actionable warning from this call still surfaces.
+        warnings.filterwarnings(
+            "ignore",
+            message="Workbook contains no default style, apply openpyxl's default",
+            category=UserWarning,
+        )
+        df = pd.read_excel(xlsx_path, sheet_name="RelatorioQualis")
     df.columns = [c.strip() for c in df.columns]
     df["Área de Avaliação"] = df["Área de Avaliação"].astype(str).str.strip()
     df = df[df["Área de Avaliação"] == QUALIS_AREA]
