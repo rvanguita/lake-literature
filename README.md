@@ -88,6 +88,19 @@ This starts two services: `airflow` (a single-container `airflow standalone` ins
 `http://localhost:8501`, wired to trigger those DAGs). Both read MySQL connection settings from `.env`, which
 neither service bakes into its image.
 
+## Git hooks
+
+Depois de clonar, instale os hooks uma vez:
+
+```bash
+uv tool install pre-commit   # ou: pip install pre-commit
+pre-commit install
+```
+
+Isso ativa dois checks em todo `git commit`:
+- **gitleaks** — varre o diff staged em busca de segredos (senhas, API keys, tokens, private keys) e bloqueia o commit se encontrar algo.
+- **block-docs-on-main** (`scripts/git-hooks/check-docs-branch.sh`) — bloqueia commits que só tocam documentação (`docs/`, `*.md`, `README*`, `CLAUDE.md`) quando feitos direto na `main`, pedindo para criar uma branch (`git checkout -b docs/<assunto>`) antes.
+
 ## Project layout
 
 ```
