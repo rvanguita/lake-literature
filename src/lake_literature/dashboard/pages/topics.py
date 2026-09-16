@@ -29,7 +29,12 @@ from lake_literature.dashboard.components import (
     render_chart,
     require_columns,
 )
-from lake_literature.dashboard.qualis import MATCH_THRESHOLD, NOT_CLASSIFIED, QUALIS_AREA
+from lake_literature.dashboard.qualis import (
+    ESTRATO_ORDER,
+    MATCH_THRESHOLD,
+    NOT_CLASSIFIED,
+    QUALIS_AREA,
+)
 from lake_literature.dashboard.theme import (
     CATEGORICAL_PALETTE,
     TREND_DOWN_COLOR,
@@ -374,7 +379,13 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
 
     counts = articles_df["venue"].value_counts()
     match_df["articles"] = match_df["venue"].map(counts).fillna(0).astype(int)
-    match_df = match_df.sort_values("articles", ascending=False)
+    # Best classification first (A1 ... C, unclassified last); most-published
+    # journal leads within a tier.
+    tier_rank = {estrato: rank for rank, estrato in enumerate(ESTRATO_ORDER)}
+    match_df["_tier_rank"] = match_df["estrato"].map(tier_rank)
+    match_df = match_df.sort_values(["_tier_rank", "articles"], ascending=[True, False]).drop(
+        columns=["_tier_rank"]
+    )
 
     n_classified = int((match_df["estrato"] != NOT_CLASSIFIED).sum())
     a1_venues = match_df.loc[match_df["estrato"] == "A1", "venue"]
@@ -410,6 +421,55 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
         hide_index=True,
         width="stretch",
     )
+
+    st.markdown("#### Total de publicações por classificação")
+    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
+    with_estrato = articles_df.copy()
+    with_estrato["estrato"] = with_estrato["venue"].map(venue_to_estrato)
+    totals_by_estrato = with_estrato["estrato"].value_counts().reindex(ESTRATO_ORDER, fill_value=0)
+    totals_by_estrato = totals_by_estrato[
+        totals_by_estrato.index.isin(with_estrato["estrato"].unique())
+    ]
+    estrato_order = list(totals_by_estrato.index)
+    fig = px.bar(
+        x=totals_by_estrato.index,
+        y=totals_by_estrato.to_numpy(),
+        category_orders={"x": estrato_order},
+        color=totals_by_estrato.index,
+        color_discrete_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
+        labels={"x": "Classificação", "y": "Artigos"},
+    )
+    fig.update_layout(showlegend=False)
+    render_chart(
+        fig,
+        caption="Total de artigos do corpus por classificação CAPES/Qualis, ordenado da melhor "
+        f'("A1") para a pior, com "{NOT_CLASSIFIED}" ao final.',
+    )
+
+    st.markdown("#### Acumulado por classificação")
+    cum_by_estrato = cumulative_by_category(with_estrato, "estrato", top_n=10)
+    if cum_by_estrato.empty:
+        st.info("Sem anos válidos para o acumulado por classificação.")
+    else:
+        fig = stacked_area(
+            cum_by_estrato,
+            x="year",
+            y="cumulative",
+            color="estrato",
+            color_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
+            category_orders={"estrato": estrato_order},
+            title="Artigos acumulados por classificação CAPES/Qualis",
+        )
+        fig.update_traces(
+            hovertemplate="Ano %{x}<br>%{data.name}: %{y:,.0f} artigos acumulados<extra></extra>"
+        )
+        fig.update_layout(xaxis_title="Ano de publicação", yaxis_title="Artigos acumulados")
+        render_chart(
+            fig,
+            caption="Composição acumulada do corpus por estrato CAPES/Qualis (área "
+            f"{QUALIS_AREA}). Periódicos sem classificação confiável ficam em "
+            f'"{NOT_CLASSIFIED}", não misturados a nenhum estrato real.',
+        )
 
     if a1_articles_df.empty:
         st.info("Nenhum artigo em periódico classificado A1 nesta camada/filtro.")
@@ -450,37 +510,3 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
     )
     fig = source_topn_hbar(top_a1, "venue", x_title="Artigos")
     render_chart(fig, caption="Periódicos A1 mais publicados pelo corpus.")
-
-    st.markdown("#### Acumulado por classificação")
-    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
-    with_estrato = articles_df.copy()
-    with_estrato["estrato"] = with_estrato["venue"].map(venue_to_estrato)
-    cum_by_estrato = cumulative_by_category(with_estrato, "estrato", top_n=10)
-    if cum_by_estrato.empty:
-        st.info("Sem anos válidos para o acumulado por classificação.")
-        return
-
-    estrato_order = [
-        e
-        for e in ("A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "C", NOT_CLASSIFIED)
-        if e in cum_by_estrato["estrato"].unique()
-    ]
-    fig = stacked_area(
-        cum_by_estrato,
-        x="year",
-        y="cumulative",
-        color="estrato",
-        color_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
-        category_orders={"estrato": estrato_order},
-        title="Artigos acumulados por classificação CAPES/Qualis",
-    )
-    fig.update_traces(
-        hovertemplate="Ano %{x}<br>%{data.name}: %{y:,.0f} artigos acumulados<extra></extra>"
-    )
-    fig.update_layout(xaxis_title="Ano de publicação", yaxis_title="Artigos acumulados")
-    render_chart(
-        fig,
-        caption="Composição acumulada do corpus por estrato CAPES/Qualis (área "
-        f"{QUALIS_AREA}). Periódicos sem classificação confiável ficam em "
-        f'"{NOT_CLASSIFIED}", não misturados a nenhum estrato real.',
-    )

@@ -28,6 +28,10 @@ MATCH_THRESHOLD = 85.0
 
 NOT_CLASSIFIED = "Não classificado"
 
+# Best to worst; unclassified always last. Shared by every chart/table that
+# ranks or orders by classification, so "A1 first" only needs to be defined once.
+ESTRATO_ORDER = ("A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "C", NOT_CLASSIFIED)
+
 
 def load_qualis_reference(path=None) -> pd.DataFrame:
     """Read the official CAPES export, filtered to `QUALIS_AREA`.
