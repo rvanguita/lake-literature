@@ -1,15 +1,15 @@
 # lake-literature
 
 `lake-literature` turns bibliographic exports on **"distribution system planning"** (electric power
-distribution networks), collected by hand from IEEE Xplore and Elsevier/ScienceDirect, into a clean,
-deduplicated, queryable corpus — with the eventual goal of a RAG-ready dataset that helps decide which papers
+distribution networks) — collected by hand from IEEE Xplore and Elsevier/ScienceDirect — into a clean,
+deduplicated, queryable corpus, with the eventual goal of a RAG-ready dataset that helps decide which papers
 to cite when writing a new article on the topic.
 
 For the full product rationale see [`docs/PRD.md`](docs/PRD.md); for the system design see
 [`docs/SDD.md`](docs/SDD.md); for the exact quirks of the source data (BibTeX parsing gotchas, DOI format
 differences, lossy PDF filename matching) see [`CLAUDE.md`](CLAUDE.md).
 
-![Arquitetura do pipeline: IEEE Xplore e Elsevier/ScienceDirect fluindo pelas camadas raw, bronze, silver, gold e embed, orquestradas pelo Apache Airflow, alimentando o dashboard Streamlit](docs/images/architecture.svg)
+![Pipeline architecture: IEEE Xplore and Elsevier/ScienceDirect flowing through the raw, bronze, silver, gold and embed layers, orchestrated by Apache Airflow, feeding the Streamlit dashboard](docs/images/architecture.svg)
 
 ## What it does
 
@@ -38,15 +38,18 @@ A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corp
 
 | Page | What it shows |
 |---|---|
-| Visão Geral | headline corpus counts and composition |
-| Produção ao Longo do Tempo | publication trends by year, IEEE vs. Elsevier |
-| Tópicos e Periódicos | keyword statistics with an interactive filter/explorer, venue breakdown |
-| Destaques e Impacto | citation distribution, most-cited/most-relevant articles |
-| Pesquisadores | author-level stats and collaboration view |
-| Tendências & Previsão | forecasting of publication/topic trends |
-| Camadas & Pipeline | per-layer record counts and pipeline run status, with buttons to trigger a stage |
-| Qualidade e RAG | data-quality flags plus RAG-chunk/embedding-readiness gauge, with a button to run the `embed` stage directly |
-| Configuração da Busca | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
+| Overview | headline corpus counts and composition |
+| Output Over Time | publication trends by year, IEEE vs. Elsevier |
+| Topics & Venues | keyword statistics with an interactive filter/explorer, venue breakdown |
+| Highlights & Impact | citation distribution, most-cited/most-relevant articles |
+| Researchers | author-level stats and collaboration view |
+| Trends & Forecast | forecasting of publication/topic trends |
+| Layers & Pipeline | per-layer record counts and pipeline run status, with buttons to trigger a stage |
+| Quality & RAG | data-quality flags plus RAG-chunk/embedding-readiness gauge, with a button to run the `embed` stage directly |
+| Search Configuration | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
+
+> Note: the page labels in the running app (`src/lake_literature/dashboard/app.py`) are currently in
+> Portuguese; the table above uses their English meaning.
 
 Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
 (`lake_literature_raw/bronze/silver/gold/embed`, defined in `airflow/dags/lake_literature_dags.py`) plus a
@@ -92,18 +95,26 @@ neither service bakes into its image.
 
 ## Git hooks
 
-Depois de clonar, instale os hooks uma vez:
+After cloning, install the hooks once:
 
 ```bash
-uv tool install pre-commit   # ou: pip install pre-commit
+uv tool install pre-commit   # or: pip install pre-commit
 pre-commit install
 ```
 
-Isso ativa dois checks em todo `git commit`:
-- **gitleaks** — varre o diff staged em busca de segredos (senhas, API keys, tokens, private keys) e bloqueia o commit se encontrar algo.
-- **block-docs-on-main** (`scripts/git-hooks/check-docs-branch.sh`) — bloqueia commits que só tocam documentação (`docs/`, `*.md`, `README*`, `CLAUDE.md`) quando feitos direto na `main`, pedindo para criar uma branch (`git checkout -b docs/<assunto>`) antes.
+This enables two checks on every `git commit`:
+- **gitleaks** — scans the staged diff for secrets (passwords, API keys, tokens, private keys) and blocks the
+  commit if it finds anything.
+- **block-docs-on-main** (`scripts/git-hooks/check-docs-branch.sh`) — blocks commits that touch only
+  documentation (`docs/`, `*.md`, `README*`, `CLAUDE.md`) when made directly on `main`, asking you to create a
+  branch (`git checkout -b docs/<topic>`) first.
 
-Se você usa o Claude Code neste projeto, o snapshot automático de sessão (hook global `auto-pr.sh`, que commita/pusha com `--no-verify` ao final de cada turno) também roda sua própria varredura de segredo antes de commitar — se encontrar algo, aborta sem commitar nem dar push, para que os dois caminhos (commit manual e automático) fiquem cobertos.
+If you use Claude Code on this project, the automatic session snapshot (the global `auto-pr.sh` hook, which
+commits/pushes with `--no-verify` at the end of every turn) also runs its own secret scan before committing —
+if it finds anything, it aborts without committing or pushing, so both paths (manual and automatic commits)
+are covered.
+
+`main` is a protected branch on GitHub: force-pushes and branch deletion are disabled.
 
 ## Project layout
 
@@ -123,7 +134,8 @@ src/lake_literature/
     pipeline_control.py    dashboard-side glue between pages and airflow_client
     analytics.py, charts.py, data.py, loaders.py, forecasting.py, theme.py, components.py
 airflow/dags/            DAG definitions (thin wrappers around `uv run lake-literature --stage X`)
-docs/                     PRD.md and SDD.md
+docs/                     PRD.md, SDD.md, images/architecture.svg
+scripts/git-hooks/        local pre-commit hook scripts
 main.py                  root Streamlit entry point (`import lake_literature.dashboard.app`)
 ```
 
