@@ -48,16 +48,25 @@ def render() -> None:
         return
 
     _headline_metrics(funnel_df)
-    st.divider()
-    _sankey_funnel(funnel_df)
-    st.divider()
-    _retention_by_stage(funnel_df)
-    st.divider()
-    _drift_check(funnel_df)
-    st.divider()
-    _metadata_coverage_by_layer()
-    st.divider()
-    with st.expander("📋 Contagem bruta por tabela (todas as camadas)"):
+
+    tab_funil, tab_retencao, tab_drift, tab_cobertura, tab_detalhes = st.tabs(
+        ["🔀 Funil", "📊 Retenção", "⚠️ Drift", "🗂️ Cobertura", "📋 Detalhes"]
+    )
+
+    with tab_funil:
+        _sankey_funnel(funnel_df)
+
+    with tab_retencao:
+        _retention_by_stage(funnel_df)
+
+    with tab_drift:
+        _drift_check(funnel_df)
+
+    with tab_cobertura:
+        _metadata_coverage_by_layer()
+
+    with tab_detalhes:
+        st.subheader("📋 Contagem bruta por tabela (todas as camadas)")
         st.dataframe(row_counts, hide_index=True, width="stretch")
 
 

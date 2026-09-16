@@ -61,7 +61,9 @@ def render() -> None:
         st.warning("Nenhum dado disponível ainda. Execute o pipeline e recarregue esta página.")
         return
 
-    tab_total, tab_ieee, tab_elsevier = st.tabs(["🌐 Total", "🔷 IEEE", "🟠 Elsevier"])
+    tab_total, tab_ieee, tab_elsevier, tab_keywords = st.tabs(
+        ["🌐 Total", "🔷 IEEE", "🟠 Elsevier", "🏷️ Tópicos em Alta"]
+    )
     for tab, label, source, color in (
         (tab_total, "Total", None, TOTAL_COLOR),
         (tab_ieee, SOURCE_LABELS["ieee"], "ieee", SOURCE_COLORS["ieee"]),
@@ -72,8 +74,8 @@ def render() -> None:
             result = fit_and_forecast(series)
             _render_series_forecast(label, color, result)
 
-    st.divider()
-    _keyword_growth_ranking(articles_df)
+    with tab_keywords:
+        _keyword_growth_ranking(articles_df)
 
 
 def _render_series_forecast(label: str, color: str, result: ForecastResult) -> None:
@@ -319,12 +321,12 @@ def _keyword_growth_ranking(articles_df: pd.DataFrame) -> None:
     ranking = pd.DataFrame(rows).sort_values("variação", ascending=False)
     top = ranking.head(min(TOP_KEYWORDS_FORECAST, len(ranking))).sort_values("variação")
 
-    col_trend, col_rank = st.columns([3, 2])
-    with col_trend:
+    sub_trend, sub_rank = st.tabs(["Trajetórias", "Ranking de Crescimento"])
+    with sub_trend:
         _keyword_trend_lines(
             ranking.head(TOP_KEYWORD_TRENDS)["keyword"].tolist(), results_by_keyword
         )
-    with col_rank:
+    with sub_rank:
         fig = go.Figure()
         fig.add_bar(
             x=top["variação"],

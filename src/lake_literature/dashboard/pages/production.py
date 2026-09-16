@@ -46,15 +46,25 @@ def render() -> None:
         st.info("Coluna 'year' vazia nesta camada.")
         return
 
-    _volume_by_year(articles_df)
-    st.divider()
-    _volume_by_year_qualis(articles_df)
-    st.divider()
-    _cumulative_production(articles_df)
-    st.divider()
-    _venue_comparison(articles_df)
-    st.divider()
-    _collaboration(articles_df)
+    tab_volume, tab_acumulado, tab_comparativo, tab_colaboracao = st.tabs(
+        ["📅 Volume", "📈 Acumulado", "🆚 Comparativo", "👥 Colaboração"]
+    )
+
+    with tab_volume:
+        sub_ano, sub_qualis = st.tabs(["Por Ano", "CAPES/Qualis"])
+        with sub_ano:
+            _volume_by_year(articles_df)
+        with sub_qualis:
+            _volume_by_year_qualis(articles_df)
+
+    with tab_acumulado:
+        _cumulative_production(articles_df)
+
+    with tab_comparativo:
+        _venue_comparison(articles_df)
+
+    with tab_colaboracao:
+        _collaboration(articles_df)
 
 
 def _volume_by_year(articles_df: pd.DataFrame) -> None:
@@ -142,9 +152,9 @@ def _cumulative_production(articles_df: pd.DataFrame) -> None:
         "Publicações acumuladas ano a ano — total e por base — seguidas da composição acumulada por "
         "periódico."
     )
-    col_total, col_venue = st.columns(2)
+    sub_total, sub_venue = st.tabs(["Total", "Por Periódico"])
 
-    with col_total:
+    with sub_total:
         cum = cumulative_by_source(articles_df)
         if cum.empty:
             st.info("Sem anos válidos para o acumulado.")
@@ -162,7 +172,7 @@ def _cumulative_production(articles_df: pd.DataFrame) -> None:
                 f"({int(cum['ieee'].iloc[-1]):,} IEEE, {int(cum['elsevier'].iloc[-1]):,} Elsevier).",
             )
 
-    with col_venue:
+    with sub_venue:
         scope_label = st.segmented_control(
             "Escopo",
             options=["Total", "IEEE", "Elsevier"],
@@ -217,9 +227,9 @@ def _venue_comparison(articles_df: pd.DataFrame) -> None:
         f"Publicações por ano discriminadas por periódico "
         f"(top {TOP_VENUES_PER_SOURCE} de cada base; os demais agrupados como '{OTHERS_LABEL}')."
     )
-    col_ieee, col_els = st.columns(2)
-    for col, src in ((col_ieee, "ieee"), (col_els, "elsevier")):
-        with col:
+    sub_ieee, sub_els = st.tabs([SOURCE_LABELS["ieee"], SOURCE_LABELS["elsevier"]])
+    for tab, src in ((sub_ieee, "ieee"), (sub_els, "elsevier")):
+        with tab:
             sub = articles_df.copy()
             sub["year"] = valid_years(sub)
             sub = sub.dropna(subset=["year"])
@@ -278,8 +288,8 @@ def _collaboration(articles_df: pd.DataFrame) -> None:
 
     means = source_means(with_authors, "n_authors")
 
-    col_dist, col_trend = st.columns(2)
-    with col_dist:
+    sub_dist, sub_trend = st.tabs(["Distribuição da Equipe", "Evolução do Tamanho"])
+    with sub_dist:
         dist = (
             with_authors["n_authors"]
             .value_counts()
@@ -313,7 +323,7 @@ def _collaboration(articles_df: pd.DataFrame) -> None:
             f"(mediana {with_authors['n_authors'].median():.0f}).",
         )
 
-    with col_trend:
+    with sub_trend:
         trend = with_authors.copy()
         trend["year"] = valid_years(trend)
         trend = trend.dropna(subset=["year"]).astype({"year": int})

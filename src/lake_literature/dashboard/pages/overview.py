@@ -85,43 +85,46 @@ def render() -> None:
 
 
 def _charts_grid(articles_df: pd.DataFrame, years_df: pd.DataFrame) -> None:
-    col_pie, col_bars = st.columns(2)
+    tab_fontes, tab_ano, tab_correlacao, tab_concentracao = st.tabs(
+        ["🥧 Fontes", "📐 Ano", "🔗 Correlação", "📉 Concentração"]
+    )
 
-    with col_pie:
-        st.subheader("Distribuição por Base / Fonte")
-        if "source" in articles_df.columns:
-            by_source = (
-                articles_df["source"].value_counts().rename_axis("source").reset_index(name="count")
-            )
-            fig = px.pie(
-                by_source,
-                names="source",
-                values="count",
-                color="source",
-                color_discrete_map=SOURCE_COLORS,
-            )
-            fig.update_traces(
-                texttemplate="<b>%{label}</b><br><b>%{value:,} (%{percent})</b>",
-                hovertemplate="<b>%{label}</b>: %{value:,} artigos (%{percent})<extra></extra>",
-            )
-            render_chart(
-                fig,
-                caption="As duas bases não possuem sobreposição: nenhum DOI se repete entre elas, de modo "
-                "que cada artigo pertence exclusivamente a uma editora.",
-            )
-        else:
-            st.info("Coluna 'source' não disponível nesta camada.")
+    with tab_fontes:
+        _source_distribution_pie(articles_df)
 
-    with col_bars:
+    with tab_ano:
         _year_distribution_by_source(years_df)
 
-    col_cum, col_venues = st.columns(2)
-
-    with col_cum:
+    with tab_correlacao:
         _correlation_heatmap(articles_df)
 
-    with col_venues:
+    with tab_concentracao:
         _venue_concentration(articles_df)
+
+
+def _source_distribution_pie(articles_df: pd.DataFrame) -> None:
+    st.subheader("Distribuição por Base / Fonte")
+    if "source" not in articles_df.columns:
+        st.info("Coluna 'source' não disponível nesta camada.")
+        return
+
+    by_source = articles_df["source"].value_counts().rename_axis("source").reset_index(name="count")
+    fig = px.pie(
+        by_source,
+        names="source",
+        values="count",
+        color="source",
+        color_discrete_map=SOURCE_COLORS,
+    )
+    fig.update_traces(
+        texttemplate="<b>%{label}</b><br><b>%{value:,} (%{percent})</b>",
+        hovertemplate="<b>%{label}</b>: %{value:,} artigos (%{percent})<extra></extra>",
+    )
+    render_chart(
+        fig,
+        caption="As duas bases não possuem sobreposição: nenhum DOI se repete entre elas, de modo "
+        "que cada artigo pertence exclusivamente a uma editora.",
+    )
 
 
 def _year_distribution_by_source(years_df: pd.DataFrame) -> None:
