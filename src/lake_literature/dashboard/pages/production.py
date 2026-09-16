@@ -18,6 +18,7 @@ from lake_literature.dashboard.analytics import (
 )
 from lake_literature.dashboard.charts import source_bars, source_lines, stacked_area
 from lake_literature.dashboard.components import page_header, render_chart, require_columns
+from lake_literature.dashboard.qualis import ESTRATO_ORDER, NOT_CLASSIFIED, QUALIS_AREA
 from lake_literature.dashboard.theme import (
     CATEGORICAL_PALETTE,
     CHART_HEIGHT,
@@ -47,6 +48,8 @@ def render() -> None:
 
     _volume_by_year(articles_df)
     st.divider()
+    _volume_by_year_qualis(articles_df)
+    st.divider()
     _cumulative_production(articles_df)
     st.divider()
     _venue_comparison(articles_df)
@@ -71,6 +74,65 @@ def _volume_by_year(articles_df: pd.DataFrame) -> None:
         fig,
         caption="A altura empilhada mostra a contribuição de cada base (IEEE e Elsevier); a linha Total "
         "soma as duas.",
+    )
+
+
+def _volume_by_year_qualis(articles_df: pd.DataFrame) -> None:
+    st.subheader("🎓 Volume de publicações por ano — classificação CAPES/Qualis (até B2)")
+    if not require_columns(articles_df, ["venue"]) or not articles_df["venue"].notna().any():
+        return
+
+    venues = sorted(articles_df["venue"].dropna().unique())
+    match_df = loaders.venue_qualis_map(tuple(venues))
+    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
+
+    # ESTRATO_ORDER is best-to-worst with the unclassified bucket last; "up to
+    # B2" is everything from A1 through B2 in that ranking.
+    allowed = ESTRATO_ORDER[: ESTRATO_ORDER.index("B2") + 1]
+
+    years_df = articles_df.copy()
+    years_df["year"] = valid_years(years_df)
+    years_df = years_df.dropna(subset=["year"]).astype({"year": int})
+    years_df["estrato"] = years_df["venue"].map(venue_to_estrato)
+    years_df = years_df[years_df["estrato"].isin(allowed)]
+
+    if years_df.empty:
+        st.info(
+            f"Nenhum artigo em periódico classificado até B2 (CAPES/Qualis, área {QUALIS_AREA}) "
+            "nesta camada/filtro."
+        )
+        return
+
+    by_year_estrato = (
+        years_df.groupby(["year", "estrato"]).size().reset_index(name="count").sort_values("year")
+    )
+    estrato_order = [e for e in allowed if e in years_df["estrato"].unique()]
+    fig = px.bar(
+        by_year_estrato,
+        x="year",
+        y="count",
+        color="estrato",
+        category_orders={"estrato": estrato_order},
+        color_discrete_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
+        barmode="stack",
+        labels={
+            "year": "Ano de publicação",
+            "count": "Quantidade de artigos",
+            "estrato": "Classificação",
+        },
+    )
+    fig.update_traces(hovertemplate="Ano %{x}<br>%{data.name}: %{y:,} artigos<extra></extra>")
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Quantidade de artigos",
+        legend_title_text="Classificação",
+    )
+    render_chart(
+        fig,
+        caption=f"Inclui apenas periódicos classificados de A1 até B2 no CAPES/Qualis (área {QUALIS_AREA}, "
+        "quadriênio 2017-2020); periódicos B3 ou piores, e os não classificados, ficam fora deste "
+        "gráfico.",
     )
 
 
