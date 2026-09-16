@@ -56,34 +56,42 @@ def render() -> None:
 
     articles_df = loaders.require_articles()
 
-    col_venues, col_keywords = st.columns(2)
-    with col_venues:
-        _top_venues(articles_df)
-    with col_keywords:
-        _top_keywords(articles_df)
+    kw_lists = None
+    all_keywords: list[str] = []
+    if "keywords" in articles_df.columns:
+        kw_lists = articles_df["keywords"].apply(
+            lambda kws: sorted({str(k).strip().lower() for k in kws if str(k).strip()})
+        )
+        all_keywords = sorted({k for kws in kw_lists for k in kws})
 
-    st.divider()
-    _capes_qualis_section(articles_df)
-
-    if not require_columns(articles_df, ["keywords"]):
-        return
-
-    kw_lists = articles_df["keywords"].apply(
-        lambda kws: sorted({str(k).strip().lower() for k in kws if str(k).strip()})
+    tab_venues, tab_keywords, tab_explorer, tab_trends = st.tabs(
+        ["📚 Periódicos", "🏷️ Palavras-Chave", "🔎 Explorador", "📈 Evolução Temporal"]
     )
-    all_keywords = sorted({k for kws in kw_lists for k in kws})
-    if not all_keywords:
-        st.info("Nenhuma palavra-chave identificada nesta camada.")
-        return
 
-    st.divider()
-    _keyword_stats(kw_lists, all_keywords)
+    with tab_venues:
+        _top_venues(articles_df)
+        st.divider()
+        _capes_qualis_section(articles_df)
 
-    st.divider()
-    _keyword_explorer(articles_df, kw_lists, all_keywords)
+    with tab_keywords:
+        _top_keywords(articles_df)
+        if all_keywords:
+            st.divider()
+            _keyword_stats(kw_lists, all_keywords)
+        else:
+            st.info("Nenhuma palavra-chave identificada nesta camada.")
 
-    st.divider()
-    _keyword_trends(articles_df)
+    with tab_explorer:
+        if all_keywords:
+            _keyword_explorer(articles_df, kw_lists, all_keywords)
+        else:
+            st.info("Nenhuma palavra-chave identificada nesta camada.")
+
+    with tab_trends:
+        if all_keywords:
+            _keyword_trends(articles_df)
+        else:
+            st.info("Nenhuma palavra-chave identificada nesta camada.")
 
 
 def _top_venues(articles_df: pd.DataFrame) -> None:

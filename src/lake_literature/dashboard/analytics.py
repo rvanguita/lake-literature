@@ -154,6 +154,15 @@ def author_count_series(df: pd.DataFrame) -> pd.Series:
     )
 
 
+def keyword_count_series(df: pd.DataFrame) -> pd.Series:
+    """Keywords per row, from the `keywords` list column -- mirrors `author_count_series`."""
+    if "keywords" not in df.columns:
+        return pd.Series(0, index=df.index, dtype="int64")
+    return df["keywords"].apply(
+        lambda k: len(k) if isinstance(k, list) else (1 if pd.notna(k) else 0)
+    )
+
+
 def explode_authors_with_position(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (article, author), plus the author's 0-based byline position.
 
