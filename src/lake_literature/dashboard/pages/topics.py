@@ -10,14 +10,12 @@ import streamlit as st
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
     cumulative_by_category,
-    cumulative_by_source,
     explode_keywords,
     source_counts_by,
     valid_years,
 )
 from lake_literature.dashboard.charts import (
     source_bars,
-    source_lines,
     source_topn_hbar,
     stacked_area,
     topn_hbar,
@@ -74,15 +72,6 @@ def render() -> None:
             sub_table,
             sub_totals,
             sub_cumulative,
-            sub_a1_vol,
-            sub_a1_cum,
-            sub_a1_rank,
-            sub_a2_vol,
-            sub_a2_cum,
-            sub_a2_rank,
-            sub_a3_vol,
-            sub_a3_cum,
-            sub_a3_rank,
             sub_a1_a3_combined,
         ) = st.tabs(
             [
@@ -90,15 +79,6 @@ def render() -> None:
                 "📋 Tabela CAPES/Qualis",
                 "📊 Publicações por Classificação",
                 "📈 Acumulado por Classificação",
-                "🥇 A1 — Volume Anual",
-                "🥇 A1 — Acumulado",
-                "🥇 A1 — Ranking",
-                "🥈 A2 — Volume Anual",
-                "🥈 A2 — Acumulado",
-                "🥈 A2 — Ranking",
-                "🥉 A3 — Volume Anual",
-                "🥉 A3 — Acumulado",
-                "🥉 A3 — Ranking",
                 "🎖️ A1-A3 — Acumulado",
             ]
         )
@@ -106,28 +86,17 @@ def render() -> None:
             _top_venues(articles_df)
 
         if require_columns(articles_df, ["venue"]) and articles_df["venue"].notna().any():
-            match_df, with_estrato, totals_by_estrato, estrato_order, tier_articles = (
-                _qualis_match_data(articles_df)
+            match_df, with_estrato, totals_by_estrato, estrato_order = _qualis_match_data(
+                articles_df
             )
             with sub_table:
-                _qualis_table(articles_df, match_df, tier_articles["A1"])
+                _qualis_table(articles_df, match_df, with_estrato[with_estrato["estrato"] == "A1"])
             with sub_totals:
                 _qualis_totals_chart(totals_by_estrato, estrato_order)
             with sub_cumulative:
                 _qualis_cumulative_chart(with_estrato, estrato_order)
-            for tier, (sub_vol, sub_cum, sub_rank) in {
-                "A1": (sub_a1_vol, sub_a1_cum, sub_a1_rank),
-                "A2": (sub_a2_vol, sub_a2_cum, sub_a2_rank),
-                "A3": (sub_a3_vol, sub_a3_cum, sub_a3_rank),
-            }.items():
-                with sub_vol:
-                    _qualis_tier_volume(tier, tier_articles[tier])
-                with sub_cum:
-                    _qualis_tier_cumulative(tier, tier_articles[tier])
-                with sub_rank:
-                    _qualis_tier_ranking(tier, tier_articles[tier])
             with sub_a1_a3_combined:
-                _qualis_a1_a3_combined(tier_articles)
+                _qualis_a1_a3_combined(with_estrato)
 
     with tab_keywords:
         sub_top, sub_stats = st.tabs(["🏷️ Top 20 Palavras-Chave", "📊 Estatísticas do Vocabulário"])
@@ -432,11 +401,11 @@ def _first_appearance(kw_year: pd.DataFrame) -> None:
 
 def _qualis_match_data(
     articles_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, list[str], dict[str, pd.DataFrame]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, list[str]]:
     """Shared computation for all "Periódicos" CAPES/Qualis sub-tabs.
 
-    Returns `(match_df, with_estrato, totals_by_estrato, estrato_order, tier_articles)`,
-    where `tier_articles` maps "A1"/"A2"/"A3" to the articles published in that tier's venues.
+    Returns `(match_df, with_estrato, totals_by_estrato, estrato_order)`; `with_estrato` is
+    `articles_df` with an added `estrato` column (each article's venue's CAPES/Qualis tier).
     """
     venues = sorted(articles_df["venue"].dropna().unique())
     match_df = loaders.venue_qualis_map(tuple(venues))
@@ -466,14 +435,7 @@ def _qualis_match_data(
     ]
     estrato_order = list(totals_by_estrato.index)
 
-    tier_articles = {
-        tier: articles_df[
-            articles_df["venue"].isin(match_df.loc[match_df["estrato"] == tier, "venue"])
-        ]
-        for tier in ("A1", "A2", "A3")
-    }
-
-    return match_df, with_estrato, totals_by_estrato, estrato_order, tier_articles
+    return match_df, with_estrato, totals_by_estrato, estrato_order
 
 
 def _qualis_table(
@@ -561,66 +523,14 @@ def _qualis_cumulative_chart(with_estrato: pd.DataFrame, estrato_order: list[str
     )
 
 
-def _qualis_tier_volume(tier: str, tier_articles_df: pd.DataFrame) -> None:
-    st.subheader(f"Periódicos {tier} — Volume Anual")
-    if tier_articles_df.empty:
-        st.info(f"Nenhum artigo em periódico classificado {tier} nesta camada/filtro.")
-        return
-
-    years_df = tier_articles_df.copy()
-    years_df["year"] = valid_years(years_df)
-    years_df = years_df.dropna(subset=["year"]).astype({"year": int})
-    by_year = source_counts_by(years_df, "year").sort_values("year")
-    if by_year.empty:
-        st.info("Sem anos válidos para este gráfico.")
-        return
-
-    fig = source_bars(by_year, "year", total_line=True)
-    fig.update_layout(hovermode="x unified", xaxis_title="Ano de publicação", yaxis_title="Artigos")
-    render_chart(fig, caption=f"Volume anual de artigos publicados em periódicos {tier}.")
-
-
-def _qualis_tier_cumulative(tier: str, tier_articles_df: pd.DataFrame) -> None:
-    st.subheader(f"Periódicos {tier} — Acumulado")
-    if tier_articles_df.empty:
-        st.info(f"Nenhum artigo em periódico classificado {tier} nesta camada/filtro.")
-        return
-
-    cum = cumulative_by_source(tier_articles_df)
-    if cum.empty:
-        st.info("Sem anos válidos para o acumulado.")
-        return
-
-    fig = source_lines(
-        cum, "year", title=f"Acumulado em periódicos {tier}", y_title="Artigos acumulados"
-    )
-    fig.update_layout(xaxis_title="Ano de publicação")
-    render_chart(
-        fig,
-        caption=f"Ao final do período, {int(cum['total'].iloc[-1]):,} artigos acumulados em "
-        f"periódicos {tier}.",
-    )
-
-
-def _qualis_tier_ranking(tier: str, tier_articles_df: pd.DataFrame) -> None:
-    st.subheader(f"Periódicos {tier} — Ranking")
-    if tier_articles_df.empty:
-        st.info(f"Nenhum artigo em periódico classificado {tier} nesta camada/filtro.")
-        return
-
-    top_tier = (
-        source_counts_by(tier_articles_df, "venue").sort_values("total", ascending=False).head(15)
-    )
-    fig = source_topn_hbar(top_tier, "venue", x_title="Artigos")
-    render_chart(fig, caption=f"Periódicos {tier} mais publicados pelo corpus.")
-
-
-def _qualis_a1_a3_combined(tier_articles: dict[str, pd.DataFrame]) -> None:
+def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
     st.subheader("Periódicos A1-A3 — Acumulado")
-    combined_df = pd.concat([tier_articles["A1"], tier_articles["A2"], tier_articles["A3"]])
+    combined_df = with_estrato[with_estrato["estrato"].isin(("A1", "A2", "A3"))]
     if combined_df.empty:
         st.info("Nenhum artigo em periódico classificado A1, A2 ou A3 nesta camada/filtro.")
         return
+
+    tier_palette = venue_color_map(["A1", "A2", "A3"])
 
     col_volume, col_ranking = st.columns(2)
     with col_volume:
@@ -646,5 +556,48 @@ def _qualis_a1_a3_combined(tier_articles: dict[str, pd.DataFrame]) -> None:
         fig = source_topn_hbar(top_combined, "venue", x_title="Artigos")
         render_chart(
             fig,
-            caption="Periódicos mais publicados pelo corpus, somando os estratos A1, A2 e A3.",
+            caption="Periódicos mais publicados pelo corpus, somando os estratos A1, A2 e A3, "
+            "coloridos por base.",
         )
+
+    st.divider()
+    col_venue_tier, col_source_tier = st.columns(2)
+    with col_venue_tier:
+        top_venues = combined_df["venue"].value_counts().head(15)
+        venue_to_estrato = combined_df.drop_duplicates("venue").set_index("venue")["estrato"]
+        fig = topn_hbar(
+            top_venues, color_by=venue_to_estrato, palette=tier_palette, x_title="Artigos"
+        )
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+        render_chart(
+            fig,
+            caption="Os mesmos periódicos mais publicados do conjunto A1-A3, agora coloridos pela "
+            "própria classificação CAPES/Qualis — mostra qual categoria cada periódico do ranking "
+            "pertence.",
+        )
+    with col_source_tier:
+        if "source" not in combined_df.columns:
+            st.info("Coluna 'source' não disponível nesta camada.")
+        else:
+            by_source_tier = (
+                combined_df.groupby(["source", "estrato"]).size().reset_index(name="count")
+            )
+            fig = px.bar(
+                by_source_tier,
+                x="source",
+                y="count",
+                color="estrato",
+                category_orders={"estrato": ["A1", "A2", "A3"], "source": ["ieee", "elsevier"]},
+                color_discrete_map=tier_palette,
+                labels={"source": "Base", "count": "Artigos", "estrato": "Classificação"},
+            )
+            fig.update_traces(
+                hovertemplate="<b>%{data.name}</b><br>%{x}: %{y:,} artigos<extra></extra>"
+            )
+            fig.update_layout(
+                xaxis_title="Base", yaxis_title="Artigos", legend_title_text="Classificação"
+            )
+            render_chart(
+                fig,
+                caption="Distribuição de artigos A1/A2/A3 por base (IEEE vs. Elsevier).",
+            )
