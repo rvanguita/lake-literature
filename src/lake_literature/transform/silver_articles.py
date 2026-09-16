@@ -1,0 +1,127 @@
+"""Build lit_silver.articles from lit_bronze.articles: dedupe by normalized
+DOI (the reliable cross-source join key -- see CLAUDE.md), attach quality
+flags, and link each article to a PDF in data/articles/ via normalized/fuzzy
+title matching (rapidfuzz) rather than exact string equality, since PDF
+filenames are a lossy transform of the title (punctuation -> `-`).
+
+Articles with no DOI at all are excluded here (logged, not silently
+dropped) -- DOI is silver's primary key and the only dependable cross-source
+identifier, so a record without one can't be deduped or safely carried
+forward as a distinct row.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+
+from rapidfuzz import fuzz, process
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from lake_literature.db.bronze_models import Article as BronzeArticle
+from lake_literature.db.raw_models import PdfFile
+from lake_literature.db.silver_models import Article as SilverArticle
+
+PDF_MATCH_THRESHOLD = 85.0
+
+
+def normalize_title(title: str | None) -> str:
+    if not title:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", " ", title.lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _merge_group(doi: str, group: list[BronzeArticle]) -> dict:
+    # Prefer the record with the most "content" (abstract length as proxy),
+    # fall back to the first one deterministically.
+    primary = max(group, key=lambda a: len(a.abstract or ""))
+    sources = sorted({a.source for a in group})
+    return {
+        "doi": doi,
+        "sources": sources,
+        "record_type": primary.record_type,
+        "title": primary.title,
+        "authors": primary.authors or [],
+        "year": primary.year,
+        "venue": primary.venue,
+        "volume": primary.volume,
+        "issue": primary.issue,
+        "pages": primary.pages,
+        "url": primary.url,
+        "abstract": primary.abstract,
+        "keywords": primary.keywords or [],
+        "citation_count": next(
+            (a.citation_count for a in group if a.citation_count is not None), None
+        ),
+        "reference_count": next(
+            (a.reference_count for a in group if a.reference_count is not None), None
+        ),
+        "has_abstract": bool(primary.abstract),
+        "has_doi": True,
+        "is_duplicate_merge": len(group) > 1,
+        "bronze_ids": [a.id for a in group],
+    }
+
+
+def _link_pdfs(session: Session, silver_rows: list[SilverArticle], pdf_files: list[PdfFile]) -> None:
+    choices = {
+        row.id: normalize_title(row.title) for row in silver_rows if row.title
+    }
+    if not choices:
+        return
+
+    for pdf in pdf_files:
+        pdf_title_guess = normalize_title(pdf.filename.rsplit(".", 1)[0])
+        match = process.extractOne(
+            pdf_title_guess,
+            choices,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=PDF_MATCH_THRESHOLD,
+        )
+        if match is None:
+            continue
+        _, score, article_id = match
+        row = next(r for r in silver_rows if r.id == article_id)
+        if row.pdf_match_score is not None and row.pdf_match_score >= score:
+            continue
+        row.has_pdf = True
+        row.pdf_path = pdf.path
+        row.pdf_match_score = score
+
+
+def build_silver_articles(
+    bronze_session: Session, silver_session: Session, raw_session: Session
+) -> dict:
+    bronze_articles = bronze_session.scalars(select(BronzeArticle)).all()
+
+    by_doi: dict[str, list[BronzeArticle]] = defaultdict(list)
+    skipped_no_doi = 0
+    for article in bronze_articles:
+        if not article.doi:
+            skipped_no_doi += 1
+            continue
+        by_doi[article.doi].append(article)
+
+    # Clear and rebuild -- silver is fully derived from bronze each run.
+    silver_session.query(SilverArticle).delete()
+
+    silver_rows: list[SilverArticle] = []
+    for doi, group in by_doi.items():
+        merged = _merge_group(doi, group)
+        row = SilverArticle(**merged)
+        silver_session.add(row)
+        silver_rows.append(row)
+    silver_session.flush()  # assign ids for PDF linking
+
+    pdf_files = raw_session.scalars(select(PdfFile)).all()
+    _link_pdfs(silver_session, silver_rows, pdf_files)
+
+    silver_session.commit()
+
+    return {
+        "written": len(silver_rows),
+        "skipped_no_doi": skipped_no_doi,
+        "has_pdf": sum(1 for r in silver_rows if r.has_pdf),
+    }
