@@ -4,8 +4,14 @@
 `chunks` is the RAG ingestion unit: every article gets an 'abstract' chunk
 (title + abstract + keywords), and articles with a linked PDF (has_pdf) also
 get 'fulltext' chunks extracted via pypdf and split into fixed-size windows.
-`embedding`/`embed_model` stay NULL here -- `transform/embeddings.py` (the
-`embed` pipeline stage, run after this one) fills them in separately.
+`embedding`/`embed_model` are filled in by `transform/embeddings.py` (the
+`embed` stage, run after this one).
+
+Chunks are reconciled, not rebuilt: a chunk whose text is unchanged is left
+untouched so it keeps its vector. This used to be a plain delete-and-rebuild,
+which silently threw away every embedding on each `gold` run -- and with them
+the basis of `lit_semantics`, leaving the semantic signals describing a corpus
+state that no longer existed.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ import logging
 import re
 
 from pypdf import PdfReader
-from sqlalchemy import select
+from sqlalchemy import delete, func, null, select, update
 from sqlalchemy.orm import Session
 
 from lake_literature.config import absolute_path
@@ -86,71 +92,143 @@ def _chunk_text(
     return chunks
 
 
+def _desired_chunks(row: SilverArticle) -> list[dict]:
+    """Every chunk `row` should produce, in `(chunk_type, seq)` order.
+
+    Split out so the reconciliation in `build_gold_articles` can compare the
+    desired set against what is already stored without restating the
+    abstract/PDF assembly rules.
+    """
+    chunks: list[dict] = []
+    abstract_text = _build_abstract_text(row)
+    if abstract_text:
+        chunks.append({"seq": 0, "chunk_type": "abstract", "text": abstract_text})
+
+    if row.has_pdf and row.pdf_path:
+        full_text = _extract_pdf_text(row.pdf_path)
+        for seq, text in enumerate(_chunk_text(full_text), start=1):
+            chunks.append({"seq": seq, "chunk_type": "fulltext", "text": text})
+    return chunks
+
+
+# MySQL has a practical cap on how many values fit in one IN (...) clause, and
+# a stale-chunk sweep can cover the whole corpus after a silver rebuild.
+_DELETE_BATCH = 500
+
+
 def build_gold_articles(silver_session: Session, gold_session: Session) -> dict:
     silver_rows = silver_session.scalars(select(SilverArticle)).all()
 
-    gold_session.query(Chunk).delete()
+    # Articles are a plain delete-and-rebuild: nothing expensive is derived from
+    # them, and `Chunk.doi` is a value-FK, so churning article ids breaks no
+    # link. Chunks are reconciled instead -- see the module docstring.
     gold_session.query(GoldArticle).delete()
 
+    # Deliberately without `Chunk.embedding`: that column is a ~384-float JSON
+    # per row (tens of MB over the corpus) and the reconciliation only needs to
+    # compare text.
+    stored: dict[tuple[str, str, int], tuple[int, str]] = {
+        (doi, chunk_type, seq): (chunk_id, text)
+        for chunk_id, doi, chunk_type, seq, text in gold_session.execute(
+            select(Chunk.id, Chunk.doi, Chunk.chunk_type, Chunk.seq, Chunk.text)
+        )
+    }
+
     n_articles = 0
-    n_abstract_chunks = 0
-    n_fulltext_chunks = 0
+    chunk_counts = {"abstract": 0, "fulltext": 0}
+    unchanged = invalidated = added = 0
+    seen: set[tuple[str, str, int]] = set()
 
     for row in silver_rows:
-        gold_article = GoldArticle(
-            doi=row.doi,
-            sources=row.sources or [],
-            title=row.title,
-            authors=row.authors or [],
-            year=row.year,
-            venue=row.venue,
-            keywords=row.keywords or [],
-            abstract=row.abstract,
-            citation_count=row.citation_count,
-            reference_count=row.reference_count,
-            countries=row.countries or [],
-            online_date=row.online_date,
-            document_type=row.document_type,
-            license=row.license,
-            url=row.url,
-            has_pdf=row.has_pdf,
-            pdf_path=row.pdf_path,
-            silver_id=row.id,
+        gold_session.add(
+            GoldArticle(
+                doi=row.doi,
+                sources=row.sources or [],
+                title=row.title,
+                authors=row.authors or [],
+                year=row.year,
+                venue=row.venue,
+                keywords=row.keywords or [],
+                abstract=row.abstract,
+                citation_count=row.citation_count,
+                reference_count=row.reference_count,
+                countries=row.countries or [],
+                online_date=row.online_date,
+                document_type=row.document_type,
+                license=row.license,
+                url=row.url,
+                has_pdf=row.has_pdf,
+                pdf_path=row.pdf_path,
+                silver_id=row.id,
+            )
         )
-        gold_session.add(gold_article)
         n_articles += 1
 
-        abstract_text = _build_abstract_text(row)
-        if abstract_text:
-            gold_session.add(
-                Chunk(
-                    doi=row.doi,
-                    seq=0,
-                    chunk_type="abstract",
-                    text=abstract_text,
-                    char_len=len(abstract_text),
-                )
-            )
-            n_abstract_chunks += 1
+        for chunk in _desired_chunks(row):
+            key = (row.doi, chunk["chunk_type"], chunk["seq"])
+            seen.add(key)
+            chunk_counts[chunk["chunk_type"]] += 1
+            existing = stored.get(key)
 
-        if row.has_pdf and row.pdf_path:
-            full_text = _extract_pdf_text(row.pdf_path)
-            for seq, chunk in enumerate(_chunk_text(full_text), start=1):
+            if existing is None:
                 gold_session.add(
                     Chunk(
                         doi=row.doi,
-                        seq=seq,
-                        chunk_type="fulltext",
-                        text=chunk,
-                        char_len=len(chunk),
+                        seq=chunk["seq"],
+                        chunk_type=chunk["chunk_type"],
+                        text=chunk["text"],
+                        char_len=len(chunk["text"]),
                     )
                 )
-                n_fulltext_chunks += 1
+                added += 1
+            elif existing[1] == chunk["text"]:
+                # Left completely untouched -- this is what preserves the vector.
+                unchanged += 1
+            else:
+                # The stored vector describes text that no longer exists, so it
+                # has to go with it; `embed` will refill just these rows.
+                gold_session.execute(
+                    update(Chunk)
+                    .where(Chunk.id == existing[0])
+                    .values(
+                        text=chunk["text"],
+                        char_len=len(chunk["text"]),
+                        # `null()`, not None: on a JSON column SQLAlchemy
+                        # persists a bare None as JSON `null`, which is not SQL
+                        # NULL -- and `build_embeddings` picks up its work with
+                        # `WHERE embedding IS NULL`, so those chunks would never
+                        # be re-embedded.
+                        embedding=null(),
+                        embed_model=None,
+                    )
+                )
+                invalidated += 1
+
+    stale_ids = [chunk_id for key, (chunk_id, _) in stored.items() if key not in seen]
+    for start in range(0, len(stale_ids), _DELETE_BATCH):
+        gold_session.execute(
+            delete(Chunk).where(Chunk.id.in_(stale_ids[start : start + _DELETE_BATCH]))
+        )
 
     gold_session.commit()
 
+    # Reported so the caller can tell the operator that `embed` (and therefore
+    # `semantic`) has work to do, instead of it being discovered later as a
+    # silently stale dashboard.
+    missing_embedding = (
+        gold_session.scalar(
+            select(func.count()).select_from(Chunk).where(Chunk.embedding.is_(None))
+        )
+        or 0
+    )
+
     return {
         "articles": n_articles,
-        "abstract_chunks": n_abstract_chunks,
-        "fulltext_chunks": n_fulltext_chunks,
+        "abstract_chunks": chunk_counts["abstract"],
+        "fulltext_chunks": chunk_counts["fulltext"],
+        "chunks_unchanged": unchanged,
+        "chunks_invalidated": invalidated,
+        "chunks_new": added,
+        "chunks_removed": len(stale_ids),
+        "chunks_missing_embedding": missing_embedding,
     }
