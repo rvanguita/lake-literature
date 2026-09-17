@@ -27,16 +27,18 @@ logic to keep in sync.
 
 ## Environment setup
 
-`.env` (git-ignored, copy from `.env.example`) needs `MYSQL_HOST/PORT/USER/PASSWORD/DB_PREFIX` and
-`AIRFLOW_BASE_URL`. `bootstrap()` (called automatically at the start of every `pipeline.run()`) issues
-`CREATE DATABASE IF NOT EXISTS` for all four `<prefix>_{raw,bronze,silver,gold}` databases plus
-`create_all()` — no manual DB setup needed beyond a reachable MySQL server and correct `.env` credentials.
+`.env` (git-ignored, copy from `.env.example`) needs `MYSQL_HOST/PORT/USER/PASSWORD` and `AIRFLOW_BASE_URL`.
+`bootstrap()` (called automatically at the start of every `pipeline.run()`) issues `CREATE DATABASE IF NOT
+EXISTS` for all four `raw`/`bronze`/`silver`/`gold` databases plus `create_all()` — no manual DB setup needed
+beyond a reachable MySQL server and correct `.env` credentials. `MYSQL_HOST` may point at a shared server
+where these database names already host unrelated tables from other projects — `bootstrap()`/the pipeline
+only ever create or touch `lit_`-prefixed tables within them, never anything else.
 
 ## Stage idempotency, at a glance
 
 | Stage | Re-run behavior |
 |---|---|
-| raw | Skips unchanged source files via sha256 hash + `raw.source_files` manifest |
+| raw | Skips unchanged source files via sha256 hash + `raw.lit_source_files` manifest |
 | bronze | Rebuilt from raw each run |
 | silver | Fully truncated + rebuilt from bronze each run |
 | gold | Fully truncated + rebuilt from silver each run |

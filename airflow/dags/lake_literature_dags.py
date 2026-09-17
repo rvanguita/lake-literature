@@ -2,11 +2,19 @@
 
 Six DAGs, matching the six stage buttons in the Streamlit dashboard 1:1:
 `lake_literature_raw/bronze/silver/gold/embed` (one task each) and
-`lake_literature_all` (five chained tasks). Every task just shells out to
-the same `uv run lake-literature --stage <stage>` entrypoint the CLI uses --
-this file intentionally does not import `lake_literature` directly, so the
-pipeline logic (ingest/transform/pipeline.py) needs zero changes to be
-orchestrated by Airflow.
+`lake_literature_all`, which groups the five chained stage tasks into a
+single `medallion_pipeline` TaskGroup so the Airflow UI graph reads as one
+connected flow -- raw -> bronze -> silver -> gold -> embed -- rather than a
+bare chain of same-level tasks. Every task just shells out to the same
+`uv run lake-literature --stage <stage>` entrypoint the CLI uses -- this file
+intentionally does not import `lake_literature` directly, so the pipeline
+logic (ingest/transform/pipeline.py) needs zero changes to be orchestrated by
+Airflow.
+
+The individual per-stage DAGs stay separate (not folded into the group)
+because the dashboard's sidebar triggers them 1:1 by DAG id (see
+`dashboard/pipeline_control.py::DAG_IDS`) to let a user re-run just one
+stage; only the "run everything" DAG needed the flow to read as one unit.
 
 All DAGs are `schedule=None` -- manual/API trigger only, no cron schedule --
 since the pipeline is meant to be run on demand from the dashboard.
@@ -16,7 +24,7 @@ from __future__ import annotations
 
 import pendulum
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import DAG
+from airflow.sdk import DAG, TaskGroup
 
 PROJECT_DIR = "/opt/airflow/project"
 START_DATE = pendulum.datetime(2024, 1, 1, tz="UTC")
@@ -46,16 +54,18 @@ for stage in STAGES:
     ):
         BashOperator(task_id=stage, bash_command=_bash_command(stage))
 
-# One combined DAG chaining all four stages in order, for the "run all" button.
+# One combined DAG running the full medallion flow as a single grouped unit,
+# for the "run all" button.
 with DAG(
     dag_id="lake_literature_all",
-    description="Run the full lake-literature medallion pipeline: raw->bronze->silver->gold.",
+    description="The lake-literature medallion pipeline as one flow: raw->bronze->silver->gold->embed.",
     schedule=None,
     start_date=START_DATE,
     catchup=False,
     default_args=default_args,
-    tags=["lake-literature"],
+    tags=["lake-literature", "pipeline"],
 ):
-    tasks = [BashOperator(task_id=stage, bash_command=_bash_command(stage)) for stage in STAGES]
-    for upstream, downstream in zip(tasks, tasks[1:], strict=False):
-        upstream >> downstream
+    with TaskGroup(group_id="medallion_pipeline") as medallion_pipeline:
+        tasks = [BashOperator(task_id=stage, bash_command=_bash_command(stage)) for stage in STAGES]
+        for upstream, downstream in zip(tasks, tasks[1:], strict=False):
+            upstream >> downstream
