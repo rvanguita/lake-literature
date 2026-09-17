@@ -19,7 +19,7 @@ Managed by [uv](https://docs.astral.sh/uv/) (Python 3.13, `uv_build` backend, sr
 ```bash
 uv sync                                          # create/refresh .venv from uv.lock
 uv run lake-literature --stage all               # full pipeline (default stage)
-uv run lake-literature --stage <stage>           # raw | bronze | silver | gold | embed | semantic
+uv run lake-literature --stage <stage>           # raw | enrich | bronze | silver | gold | embed | semantic
 uv run python -m lake_literature.db.bootstrap    # create the 4 databases + tables only, no ingestion
 uv run streamlit run main.py                     # dashboard at http://localhost:8501
 docker compose up -d                             # Airflow (:8080) + dashboard (:8501), both read .env
@@ -29,7 +29,9 @@ uv run ruff check --fix && uv run ruff format    # lint + format (config in pypr
 uv add <pkg>                                     # add a dependency (updates pyproject.toml + uv.lock)
 ```
 
-MySQL connection settings and `AIRFLOW_BASE_URL` live in `.env` (git-ignored; see `.env.example`).
+MySQL connection settings, `AIRFLOW_BASE_URL` and the optional `ENRICHMENT_MAILTO` (contact address for
+OpenAlex/Crossref's polite pools — deliberately not hardcoded) live in `.env` (git-ignored; see
+`.env.example`).
 
 ## Skills
 
@@ -46,11 +48,16 @@ MySQL connection settings and `AIRFLOW_BASE_URL` live in `.env` (git-ignored; se
 
 ### Stage graph
 
-`raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py` and each a
-1:1 Airflow DAG (`airflow/dags/lake_literature_dags.py`, thin `BashOperator` wrappers around the same CLI —
-the DAG file deliberately never imports `lake_literature`).
+`raw → enrich → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py` and
+each a 1:1 Airflow DAG (`airflow/dags/lake_literature_dags.py`, thin `BashOperator` wrappers around the same
+CLI — the DAG file deliberately never imports `lake_literature`). Every run is recorded in
+`raw.lit_pipeline_runs` by `pipeline.py`'s `_recorded` wrapper, whatever started it.
 
-- `raw` — verbatim ingestion, one table per source artifact (`ingest/raw_{csv,bib,pdfs,config}.py`).
+- `raw` — verbatim ingestion, one table per source artifact (`ingest/raw_{csv,bib,pdfs,config}.py`). Each
+  file is hashed, parsed and committed on its own, so one malformed export is reported in `failed_files`
+  instead of aborting the stage.
+- `enrich` — citation/reference counts per DOI from OpenAlex (Crossref fallback) into `raw.lit_enrichment`
+  (`ingest/enrichment_api.py`). Network-bound and best-effort; never fails the pipeline.
 - `bronze` — IEEE CSV + IEEE `.bib` + Elsevier `.bib` unioned into one typed schema. The IEEE CSV is the
   authoritative record list; `.bib` entries only enter as their own record when their DOI is absent from the CSV.
 - `silver` — dedup by normalized DOI, quality flags, fuzzy PDF linking (rapidfuzz, threshold 85).
@@ -59,18 +66,23 @@ the DAG file deliberately never imports `lake_literature`).
 - `embed` — fills `lit_chunks.embedding` locally via `fastembed` (`BAAI/bge-small-en-v1.5`, ONNX, no API key).
 - `semantic` — reads those embeddings, writes `lit_semantics` + `lit_duplicate_pairs`.
 
-**`gold` truncates and rebuilds the chunks, which drops their vectors — re-running it means re-running
-`embed` and then `semantic`.**
+**`gold` reconciles chunks instead of rebuilding them**: a chunk whose text is unchanged is left untouched
+and keeps its vector, one whose text changed has its `embedding` reset to SQL `NULL` (via `null()` — a bare
+`None` on a JSON column persists as JSON `null`, which `WHERE embedding IS NULL` would never match), and one
+that no longer exists is deleted. Only genuinely changed text needs re-embedding, and `run_gold` prints how
+many chunks are still waiting for a vector.
 
 ### Idempotency, per stage
 
 Each stage has its own re-run contract; preserve it when editing.
 
 - `raw` — content-hash manifest (`ingest/hashing.py` ↔ `lit_source_files`); unchanged files are skipped.
+- `enrich` — only fetches a DOI with no row yet or one older than `REFRESH_AFTER_DAYS`; a second run right
+  after the first makes no requests at all.
 - `bronze` — upsert keyed on `(source, source_id)`; pagination duplicates within a source collapse naturally.
-  Note `_upsert` writes field by field, so a `None` literal *overwrites* — that's why `ingest/enrichment.py`
-  re-applies the citation/reference-count backfill after every bronze build.
-- `silver` / `gold` — delete-and-rebuild: fully derived from the layer above.
+  `_upsert` writes every key it is given, `None` included, so a caller without a value must **omit** the key
+  rather than pass `None` — that is how every Elsevier citation count used to be erased on each build.
+- `silver` — delete-and-rebuild: fully derived from bronze. `gold`'s articles too, but not its chunks (above).
 - `embed` — only processes `embedding IS NULL`; running it twice is a no-op.
 - `semantic` — truncates the two tables it owns, never touches curated article rows.
 
@@ -123,10 +135,11 @@ Relevance screening is a core SLR step, so every article gets a cosine score aga
 (`transform/semantics.py::ANCHOR_TEXT`) and the dashboard lets a reviewer act on it. Nothing is auto-deleted,
 and articles with no score are never filtered out by `loaders.filter_articles`.
 
-## Data corpus (`data/`, gitignored)
+## Data corpus (`data/`, mostly gitignored)
 
-`data/` is excluded from git, so it exists only on this machine and paths referenced in code will not resolve for
-anyone else. Treat it as read-only input: it is raw publisher output, re-downloading it is manual and tedious.
+Most of `data/` is excluded from git (`data/elsevier/` is the exception — its `.bib` files *are* tracked), so
+the IEEE export, the PDFs and the reference xlsx exist only on this machine and paths referenced in code will
+not resolve for anyone else. Treat it as read-only input: it is raw publisher output, re-downloading it is manual and tedious.
 (A `PreToolUse` hook in `.claude/settings.json` blocks edits to it, except `config.csv`.)
 
 ```
@@ -134,7 +147,7 @@ data/ieee/       IEEE Xplore export: one metadata CSV + paginated .bib files + b
 data/elsevier/   ScienceDirect export: paginated .bib files only (no CSV, no PDFs)
 data/articles/   ~96 PDFs, extracted from the IEEE bulk-download zips
 data/sciencedirect.zip            original archive that data/elsevier/ was unpacked from
-data/enrichment_cache.json        hand-built {doi: {citation_count, reference_count}}, not produced by any code here
+data/enrichment_cache.json        legacy hand-built {doi: {...}}; superseded by the `enrich` stage, still read as a fallback
 data/classificações_publicadas_*.xlsx   official CAPES/Qualis export (see dashboard/qualis.py)
 ```
 
@@ -156,7 +169,7 @@ Anything that merges IEEE and Elsevier records has to normalize these difference
 | `keywords` | `;`-separated | `,`-separated |
 | Venue field | `journal` | `journal`, plus `url` and sometimes `note` |
 | Affiliations, online date, document type, license | yes (CSV only) | none |
-| Citation / reference counts | yes (CSV only) | none — backfilled from `enrichment_cache.json` |
+| Citation / reference counts | yes (CSV only) | none — backfilled by the `enrich` stage (OpenAlex/Crossref) |
 | Full text | yes, PDFs in the zips | none |
 
 DOI is the only reliable cross-source join/dedup key — strip the `https://doi.org/` prefix and casefold before

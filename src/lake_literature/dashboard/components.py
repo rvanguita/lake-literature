@@ -55,7 +55,10 @@ def _trigger(stage: str) -> None:
             "dag_id": DAG_IDS.get(stage, stage),
             "dag_run_id": None,
             "state": "error",
-            "error": str(exc),
+            # Every stage button goes through Airflow, so "unreachable" is the
+            # most common failure here and the fix is always the same -- say it
+            # instead of surfacing a bare connection error.
+            "error": f"{exc} — suba os serviços com `docker compose up -d` e tente novamente.",
         }
 
 
@@ -222,7 +225,9 @@ def render_sidebar() -> None:
                 with st.spinner(f"Disparando {STAGE_LABELS[stage]} no Airflow..."):
                     _trigger(stage)
 
-        if st.button("⏩ Executar tudo (raw→bronze→silver→gold→embed→semantic)", key="run_all"):
+        if st.button(
+            "⏩ Executar tudo (raw→enrich→bronze→silver→gold→embed→semantic)", key="run_all"
+        ):
             with st.spinner("Disparando o pipeline completo no Airflow..."):
                 _trigger("all")
 
@@ -311,6 +316,26 @@ def require_columns(df: pd.DataFrame, cols: list[str], message: str | None = Non
         or f"Coluna(s) {', '.join(f'`{c}`' for c in missing)} não disponível(is) nesta camada."
     )
     return False
+
+
+def semantic_staleness_notice() -> None:
+    """Warn when the semantic signals on screen predate the current embeddings.
+
+    Every page that renders `lit_semantics` used to show it unconditionally, so
+    a `gold` rebuild that dropped the vectors behind it left relevance, themes
+    and near-duplicates describing a corpus state that no longer existed, with
+    nothing saying so. The wording lives here so both pages say the same thing.
+    """
+    freshness = loaders.semantic_freshness()
+    if not freshness.get("is_stale"):
+        return
+    st.warning(
+        f"**Sinais semânticos desatualizados.** {freshness['orphaned']:,} de "
+        f"{freshness['semantics_rows']:,} artigos têm relevância e tema calculados a partir de "
+        f"embeddings que não existem mais, e apenas {freshness['coverage']:.0%} dos resumos estão "
+        "embedados agora. Rode `embed` e depois `semantic` (botões na barra lateral, ou "
+        "`uv run lake-literature --stage embed`) para recalcular."
+    )
 
 
 def render_chart(fig, *, caption: str | None = None, height: int | None = None) -> None:

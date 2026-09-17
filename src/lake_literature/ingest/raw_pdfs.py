@@ -13,9 +13,14 @@ from lake_literature.db.raw_models import PdfFile
 from lake_literature.ingest.hashing import record_source_file, sha256_file
 
 
-def load_pdf_inventory(session) -> int:
+def _load_pdf_dir(session, directory) -> int:
+    """Inventory every *.pdf in `directory`. Returns rows written or updated.
+
+    Takes the directory as an argument (like `raw_bib._load_bib_dir`) so the
+    "file replaced, hash changed" branch below can be exercised in tests.
+    """
     written = 0
-    for pdf_path in sorted(ARTICLES_DIR.glob("*.pdf")):
+    for pdf_path in sorted(directory.glob("*.pdf")):
         record_source_file(session, pdf_path, source="articles", kind="pdf")
 
         existing = session.scalar(select(PdfFile).where(PdfFile.filename == pdf_path.name))
@@ -39,3 +44,8 @@ def load_pdf_inventory(session) -> int:
 
     session.commit()
     return written
+
+
+def load_pdf_inventory(session) -> int:
+    """Inventory data/articles/*.pdf (see `_load_pdf_dir`)."""
+    return _load_pdf_dir(session, ARTICLES_DIR)

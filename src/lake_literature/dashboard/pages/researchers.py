@@ -39,6 +39,7 @@ from lake_literature.dashboard.components import (
     metric_row,
     page_header,
     render_chart,
+    require_columns,
 )
 from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, theme_tokens
 
@@ -228,15 +229,23 @@ def render() -> None:
             _volume_vs_impact(author_rows)
 
 
-def _top_authors(author_rows: pd.DataFrame) -> None:
-    st.subheader("✍️ Autores mais prolíficos (canonicalizado)")
-    count_col = "doi" if "doi" in author_rows.columns else "author_display"
-    agg = "nunique" if count_col == "doi" else "size"
-    counts = author_rows.groupby("author_display")[count_col].agg(agg)
-    top_index = counts.sort_values(ascending=False).head(15).index
+AUTHOR_RANKING_TOP_N = 15
 
-    if "source" in author_rows.columns:
-        scoped = author_rows[author_rows["author_display"].isin(top_index)]
+
+def _author_ranking_figure(rows: pd.DataFrame, x_title: str):
+    """Top-N author bar chart, split by source when the layer carries one.
+
+    The prolific-authors and lead-authors rankings differ only in which rows
+    they count and what the axis says, so they share this instead of keeping
+    two near-identical copies of the count/pivot/hover setup.
+    """
+    count_col = "doi" if "doi" in rows.columns else "author_display"
+    agg = "nunique" if count_col == "doi" else "size"
+    counts = rows.groupby("author_display")[count_col].agg(agg)
+    top_index = counts.sort_values(ascending=False).head(AUTHOR_RANKING_TOP_N).index
+
+    if "source" in rows.columns:
+        scoped = rows[rows["author_display"].isin(top_index)]
         by_source = (
             scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
         )
@@ -245,18 +254,24 @@ def _top_authors(author_rows: pd.DataFrame) -> None:
                 by_source[src] = 0
         by_source["total"] = counts.reindex(top_index)
         by_source = by_source.reindex(top_index).reset_index()
-        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos")
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+        fig = source_topn_hbar(by_source, "author_display", x_title=x_title)
     else:
-        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos")
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
-    render_chart(fig)
+        fig = topn_hbar(counts.reindex(top_index), x_title=x_title)
+
+    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    return fig
+
+
+def _top_authors(author_rows: pd.DataFrame) -> None:
+    st.subheader("✍️ Autores mais prolíficos (canonicalizado)")
+    render_chart(_author_ranking_figure(author_rows, x_title="Artigos"))
 
 
 def _lead_authors_ranking(author_rows: pd.DataFrame) -> None:
     st.subheader("🥇 Mais frequentes como 1º ou 2º autor")
-    if "position" not in author_rows.columns:
-        st.info("Posição do autor na publicação não disponível nesta camada.")
+    if not require_columns(
+        author_rows, ["position"], "Posição do autor na publicação não disponível nesta camada."
+    ):
         return
 
     lead_rows = author_rows[author_rows["position"] <= 1]
@@ -264,26 +279,7 @@ def _lead_authors_ranking(author_rows: pd.DataFrame) -> None:
         st.info("Nenhum autor em 1ª/2ª posição identificado nesta camada.")
         return
 
-    count_col = "doi" if "doi" in lead_rows.columns else "author_display"
-    agg = "nunique" if count_col == "doi" else "size"
-    counts = lead_rows.groupby("author_display")[count_col].agg(agg)
-    top_index = counts.sort_values(ascending=False).head(15).index
-
-    if "source" in lead_rows.columns:
-        scoped = lead_rows[lead_rows["author_display"].isin(top_index)]
-        by_source = (
-            scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
-        )
-        for src in ("ieee", "elsevier"):
-            if src not in by_source.columns:
-                by_source[src] = 0
-        by_source["total"] = counts.reindex(top_index)
-        by_source = by_source.reindex(top_index).reset_index()
-        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos como 1º/2º autor")
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
-    else:
-        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos como 1º/2º autor")
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    fig = _author_ranking_figure(lead_rows, x_title="Artigos como 1º/2º autor")
     render_chart(
         fig,
         caption="Contagem combinada de artigos em que o autor aparece na 1ª OU 2ª posição da lista de "
@@ -487,8 +483,9 @@ def _correlation_by_source(author_rows: pd.DataFrame) -> pd.DataFrame:
 
 def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
     st.subheader("📊 Volume × impacto")
-    if "citation_count" not in author_rows.columns:
-        st.info("Coluna 'citation_count' não disponível nesta camada.")
+    if not require_columns(
+        author_rows, ["citation_count"], "Coluna 'citation_count' não disponível nesta camada."
+    ):
         return
     stats = output_impact_correlation(author_rows, "citation_count")
     by_author = author_rows.groupby("author_display").agg(
@@ -619,8 +616,9 @@ def _productivity_trend(matrix: pd.DataFrame) -> None:
 
 def _coauthorship_network(author_rows: pd.DataFrame) -> None:
     st.subheader("🕸️ Rede de coautoria (top autores)")
-    if "doi" not in author_rows.columns:
-        st.info("Coluna 'doi' não disponível para reconstruir a rede.")
+    if not require_columns(
+        author_rows, ["doi"], "Coluna 'doi' não disponível para reconstruir a rede."
+    ):
         return
 
     counts = author_rows.groupby("author_display")["doi"].nunique()

@@ -17,6 +17,7 @@ from lake_literature.dashboard.components import (
     page_header,
     render_chart,
     require_columns,
+    semantic_staleness_notice,
 )
 from lake_literature.dashboard.search import semantic_search
 from lake_literature.dashboard.theme import (
@@ -36,6 +37,8 @@ def render() -> None:
         "Qualidade e RAG",
         "Diagnóstico do corpus como fonte para RAG: metadados, texto completo e fragmentos (chunks).",
     )
+
+    semantic_staleness_notice()
 
     articles_df = loaders.require_articles()
     chunks_df = loaders.filtered_chunks()
@@ -98,11 +101,12 @@ def _ieee_extras(articles_df: pd.DataFrame) -> None:
     """
     st.subheader("🔷 Campos exclusivos da base IEEE")
 
-    if "countries" not in articles_df.columns:
-        st.info(
-            "Colunas de enriquecimento IEEE ainda não existem nesta camada — rode "
-            "`uv run lake-literature --stage bronze` (e silver/gold) para populá-las."
-        )
+    if not require_columns(
+        articles_df,
+        ["countries"],
+        "Colunas de enriquecimento IEEE ainda não existem nesta camada — rode "
+        "`uv run lake-literature --stage bronze` (e silver/gold) para populá-las.",
+    ):
         return
 
     ieee_only = articles_df[
@@ -495,8 +499,7 @@ def _chunk_length_histogram(chunks_df: pd.DataFrame) -> None:
 
 
 def _chunks_per_article(chunks_df: pd.DataFrame) -> None:
-    if "doi" not in chunks_df.columns:
-        st.info("Coluna 'doi' não disponível nesta camada.")
+    if not require_columns(chunks_df, ["doi"], "Coluna 'doi' não disponível nesta camada."):
         return
 
     chunks_per_article = chunks_df.groupby("doi").size()
@@ -557,12 +560,26 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
     st.subheader("🔍 Busca nos chunks")
     has_embeddings = "has_embedding" in chunks_df.columns and bool(chunks_df["has_embedding"].any())
 
+    # Share, not just presence: with a single embedded chunk the branch below
+    # would promise a "real vector search" while silently ranking over a sliver
+    # of the corpus.
+    embedded_share = (
+        float(chunks_df["has_embedding"].mean())
+        if "has_embedding" in chunks_df.columns and not chunks_df.empty
+        else 0.0
+    )
+
     if has_embeddings:
         st.caption(
             "Busca por similaridade vetorial real: a consulta é embedada com o mesmo modelo "
             "(`BAAI/bge-small-en-v1.5` via `fastembed`) usado para os chunks, e os resultados são "
             "ordenados por similaridade de cosseno (`dashboard/search.py`)."
         )
+        if embedded_share < 1:
+            st.warning(
+                f"Apenas {embedded_share:.0%} dos chunks deste recorte têm vetor — a busca cobre "
+                "somente essa fração. Rode a etapa `embed` para incluir o resto."
+            )
     else:
         st.caption(
             "Isto simula uma recuperação por palavra-chave, **não** uma busca semântica real — a coluna "

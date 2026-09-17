@@ -177,16 +177,11 @@ def _top_keywords(articles_df: pd.DataFrame) -> None:
     top_20_kw = kw_exploded["keyword"].value_counts().head(20).index.tolist()
     filtered_kw = kw_exploded[kw_exploded["keyword"].isin(top_20_kw)]
 
-    if "source" in filtered_kw.columns:
-        grouped = filtered_kw.groupby(["keyword", "source"]).size().unstack(fill_value=0)
-        for s in ("ieee", "elsevier"):
-            if s not in grouped.columns:
-                grouped[s] = 0
-        grouped["total"] = grouped.sum(axis=1)
-    else:
-        grouped = filtered_kw.groupby("keyword").size().to_frame(name="total")
-        grouped["ieee"] = 0
-        grouped["elsevier"] = 0
+    # `source_counts_by` is the shared ieee/elsevier/total shape every
+    # source-comparison chart consumes; it also handles a layer with no
+    # `source` column. Indexed by keyword here because the chart below reads
+    # rows by label.
+    grouped = source_counts_by(filtered_kw, "keyword").set_index("keyword")
 
     fig = topn_hbar(
         grouped["total"], x_title="Quantidade de artigos", title="Top 20 palavras-chave"
@@ -250,7 +245,7 @@ def _prepare_keyword_trend_data(articles_df: pd.DataFrame) -> pd.DataFrame | Non
     kw_year = explode_keywords(articles_df)
     if kw_year.empty or "year" not in kw_year.columns:
         return None
-    kw_year["year"] = valid_years(kw_year, lo=TREND_MIN_YEAR, hi=2026)
+    kw_year["year"] = valid_years(kw_year, lo=TREND_MIN_YEAR)
     kw_year = kw_year.dropna(subset=["year"]).astype({"year": int})
     if len(kw_year) < 30:
         return None

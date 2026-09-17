@@ -9,6 +9,7 @@ normalization are used everywhere.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 import unicodedata
 
@@ -23,15 +24,36 @@ OTHERS_LABEL = "Outros"
 RECENT_WINDOW_YEARS = 5
 
 
-def valid_years(df: pd.DataFrame, lo: int = 1950, hi: int = 2026) -> pd.Series:
+MIN_VALID_YEAR = 1950
+
+
+def max_valid_year() -> int:
+    """Highest publication year treated as real data.
+
+    Publishers assign a publication year ahead of print, so the corpus
+    legitimately carries next-year (in-press) records -- `forecasting.py` reads
+    them as real partial data. Derived from the current year rather than
+    hardcoded: this used to be a literal 2026, which silently dropped every
+    2027 in-press article from every cumulative/trend chart while the forecast
+    page was projecting 2027 from them.
+    """
+    return dt.date.today().year + 1
+
+
+def valid_years(df: pd.DataFrame, lo: int = MIN_VALID_YEAR, hi: int | None = None) -> pd.Series:
     """Coerce `year` to numeric and drop rows outside a plausible window.
 
-    The corpus spans 1926-2027 (in-press records included), but a handful of
-    very old or future-dated rows would otherwise dominate any rate/trend
-    calculation. Returns a Series aligned to `df`'s index (NaN where invalid),
-    matching `pd.to_numeric(..., errors="coerce")` semantics -- callers that
-    need only valid rows should `.dropna()` the result themselves.
+    The corpus spans 1926 to next year. Pre-1950 rows are excluded on purpose:
+    a handful of very old records would otherwise dominate any rate/trend
+    calculation. In-press rows are kept -- see `max_valid_year`. `hi` defaults
+    to it, and is resolved per call so a long-running Streamlit process doesn't
+    hold a stale boundary after a new year starts.
+
+    Returns a Series aligned to `df`'s index (NaN where invalid), matching
+    `pd.to_numeric(..., errors="coerce")` semantics -- callers that need only
+    valid rows should `.dropna()` the result themselves.
     """
+    hi = max_valid_year() if hi is None else hi
     years = pd.to_numeric(df.get("year"), errors="coerce")
     return years.where(years.between(lo, hi))
 
@@ -561,36 +583,3 @@ def output_impact_correlation(
         by_author["articles"].corr(by_author["mean_impact"], method="spearman")
     )
     return result
-
-
-LAYER_ORDER = ("raw", "bronze", "silver", "gold")
-LAYER_LABELS = {"raw": "Raw", "bronze": "Bronze", "silver": "Silver", "gold": "Gold"}
-
-
-def layer_source_counts(
-    bronze_df: pd.DataFrame, silver_df: pd.DataFrame, gold_df: pd.DataFrame
-) -> pd.DataFrame:
-    """IEEE / Elsevier / total article counts for bronze, silver, and gold.
-
-    Bronze has a scalar `source`; silver/gold only carry a `sources` list --
-    normalize both to the same ieee/elsevier/total shape so the funnel chart
-    can compare layers directly.
-    """
-    rows = []
-    for layer, frame, col in (
-        ("bronze", bronze_df, "source"),
-        ("silver", silver_df, "sources"),
-        ("gold", gold_df, "sources"),
-    ):
-        if frame.empty:
-            rows.append({"layer": layer, "ieee": 0, "elsevier": 0, "total": 0})
-            continue
-        if col == "source":
-            ieee = int((frame["source"] == "ieee").sum())
-            elsevier = int((frame["source"] == "elsevier").sum())
-        else:
-            src_lists = frame[col] if col in frame.columns else pd.Series([[]] * len(frame))
-            ieee = int(src_lists.apply(lambda s: isinstance(s, list) and "ieee" in s).sum())
-            elsevier = int(src_lists.apply(lambda s: isinstance(s, list) and "elsevier" in s).sum())
-        rows.append({"layer": layer, "ieee": ieee, "elsevier": elsevier, "total": len(frame)})
-    return pd.DataFrame(rows)

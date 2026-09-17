@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lake_literature.db.raw_models import BibEntry
+from lake_literature.db.raw_models import BibEntry, SourceFile
 from lake_literature.ingest.raw_bib import _load_bib_dir
 
 
@@ -35,10 +35,11 @@ def test_load_bib_dir_parses_single_well_formed_entry(raw_session, tmp_path):
 """,
     )
 
-    written = _load_bib_dir(raw_session, "ieee", tmp_path)
+    written, failed, blocks = _load_bib_dir(raw_session, "ieee", tmp_path)
     raw_session.commit()
 
     assert written == 1
+    assert failed == []
     entries = raw_session.query(BibEntry).all()
     assert len(entries) == 1
     entry = entries[0]
@@ -67,10 +68,11 @@ def test_load_bib_dir_parses_entries_with_no_separator_between_them(raw_session,
         "}\n",
     )
 
-    written = _load_bib_dir(raw_session, "ieee", tmp_path)
+    written, failed, blocks = _load_bib_dir(raw_session, "ieee", tmp_path)
     raw_session.commit()
 
     assert written == 2
+    assert failed == []
     entries = {e.bib_key: e for e in raw_session.query(BibEntry).all()}
     assert set(entries) == {"First2019", "Second2019"}
     assert entries["First2019"].fields["title"] == "First Paper"
@@ -109,13 +111,13 @@ def test_load_bib_dir_skips_unchanged_files_and_reprocesses_on_change(raw_sessio
 """,
     )
 
-    first = _load_bib_dir(raw_session, "ieee", tmp_path)
+    first, _, _ = _load_bib_dir(raw_session, "ieee", tmp_path)
     raw_session.commit()
     assert first == 1
     assert raw_session.query(BibEntry).count() == 1
 
     # Second pass over the same, unchanged file must not reprocess/duplicate it.
-    second = _load_bib_dir(raw_session, "ieee", tmp_path)
+    second, _, _ = _load_bib_dir(raw_session, "ieee", tmp_path)
     raw_session.commit()
     assert second == 0
     assert raw_session.query(BibEntry).count() == 1
@@ -126,8 +128,50 @@ def test_load_bib_dir_skips_unchanged_files_and_reprocesses_on_change(raw_sessio
         bib_path.read_text(encoding="utf-8").replace("Repeat Paper", "Repeat Paper Revised"),
         encoding="utf-8",
     )
-    third = _load_bib_dir(raw_session, "ieee", tmp_path)
+    third, _, _ = _load_bib_dir(raw_session, "ieee", tmp_path)
     raw_session.commit()
     assert third == 1
     assert raw_session.query(BibEntry).count() == 1
     assert raw_session.query(BibEntry).one().fields["title"] == "Repeat Paper Revised"
+
+
+def test_a_corrupt_block_is_reported_instead_of_silently_dropped(raw_session, tmp_path):
+    # bibtexparser does not raise on a truncated entry -- it records a failed
+    # block and returns the rest, so a damaged export would otherwise be
+    # ingested as "fine, just smaller".
+    _write_bib(
+        tmp_path,
+        "partial.bib",
+        "@ARTICLE{Good2020,\n"
+        "  author={A. Author},\n"
+        "  title={Good Paper},\n"
+        "  year={2020},\n"
+        "}\n"
+        "@ARTICLE{Truncated2021,\n"
+        "  author={B. Author},\n"
+        "  title={Never closed",
+    )
+
+    written, failed, blocks = _load_bib_dir(raw_session, "ieee", tmp_path)
+
+    assert written == 1  # the intact entry is kept
+    assert failed == []  # the file itself was readable
+    assert blocks == 1  # ...but one entry was lost, and it is counted
+    assert raw_session.query(BibEntry).one().bib_key == "Good2020"
+
+
+def test_an_unreadable_file_does_not_abort_the_others(raw_session, tmp_path):
+    _write_bib(tmp_path, "a_good.bib", "@ARTICLE{Good2020,\n  title={Good},\n  year={2020},\n}\n")
+    # A directory named like a .bib file: `glob("*.bib")` picks it up and
+    # reading it raises IsADirectoryError -- a real I/O failure, standing in for
+    # the unreadable/permission-denied export this has to survive.
+    (tmp_path / "b_bad.bib").mkdir()
+
+    written, failed, _ = _load_bib_dir(raw_session, "ieee", tmp_path)
+
+    assert written == 1
+    assert [Path(p).name for p in failed] == ["b_bad.bib"]
+    assert raw_session.query(BibEntry).one().bib_key == "Good2020"
+    # The failed file must stay unrecorded so the next run retries it.
+    recorded = {Path(f.path).name for f in raw_session.query(SourceFile).all()}
+    assert recorded == {"a_good.bib"}

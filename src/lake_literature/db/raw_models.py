@@ -10,6 +10,8 @@ import datetime as dt
 from sqlalchemy import JSON, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from lake_literature.db import utcnow
+
 
 class Base(DeclarativeBase):
     pass
@@ -29,7 +31,27 @@ class SourceFile(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer)
     mtime: Mapped[dt.datetime] = mapped_column(DateTime)
-    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PipelineRun(Base):
+    """One row per stage execution, however the stage was started.
+
+    Airflow keeps run history, but only for runs triggered through Airflow -- a
+    `uv run lake-literature --stage ...` from a terminal left no trace at all,
+    and the dashboard had to infer what had run from live row counts. This is
+    the durable record of what ran, when, and with what result.
+    """
+
+    __tablename__ = "lit_pipeline_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stage: Mapped[str] = mapped_column(String(32), index=True)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16))  # 'running' | 'success' | 'error'
+    stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Config(Base):
@@ -45,6 +67,25 @@ class Config(Base):
     search_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_text: Mapped[str] = mapped_column(Text)
     source_file: Mapped[str] = mapped_column(String(512))
+
+
+class Enrichment(Base):
+    """Citation/reference counts fetched per DOI from a public metadata API.
+
+    Elsevier's .bib carries neither count and the IEEE CSV only covers its own
+    records, so most of the corpus has no impact data of its own. This replaces
+    `data/enrichment_cache.json`, which was hand-built for one corpus snapshot
+    and therefore left every newly added record empty forever.
+    """
+
+    __tablename__ = "lit_enrichment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doi: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    citation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reference_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_api: Mapped[str] = mapped_column(String(32))  # 'openalex' | 'crossref'
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class IeeeCsvRow(Base):

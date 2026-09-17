@@ -30,11 +30,11 @@ def render() -> None:
     )
 
     hero_banner(
-        "Sem histórico de execuções",
-        "Não existe uma tabela de histórico de runs no pipeline — as estatísticas de cada estágio só vão "
-        "para <code>print</code> e para os logs do Airflow, e silver/gold são truncadas e reconstruídas a "
-        "cada execução. Todos os números desta página são calculados ao vivo a partir do estado atual das "
-        "quatro bases MySQL.",
+        "O pipeline inteiro, sem filtros",
+        "Todos os números desta página são calculados ao vivo sobre as quatro bases MySQL e "
+        "<b>ignoram os filtros globais</b> de ano, fonte e periódico da barra lateral — ela descreve o "
+        "pipeline como um todo, não o recorte selecionado, então não espere que batam com as outras "
+        "páginas. O histórico de execuções fica na aba <b>Execuções</b>.",
     )
 
     funnel_df = loaders.layer_funnel()
@@ -49,8 +49,8 @@ def render() -> None:
 
     _headline_metrics(funnel_df)
 
-    tab_funil, tab_retencao, tab_drift, tab_cobertura, tab_detalhes = st.tabs(
-        ["🔀 Funil", "📊 Retenção", "⚠️ Drift", "🗂️ Cobertura", "📋 Detalhes"]
+    tab_funil, tab_retencao, tab_drift, tab_cobertura, tab_detalhes, tab_execucoes = st.tabs(
+        ["🔀 Funil", "📊 Retenção", "⚠️ Drift", "🗂️ Cobertura", "📋 Detalhes", "🕒 Execuções"]
     )
 
     with tab_funil:
@@ -68,6 +68,9 @@ def render() -> None:
     with tab_detalhes:
         st.subheader("📋 Contagem bruta por tabela (todas as camadas)")
         st.dataframe(row_counts, hide_index=True, width="stretch")
+
+    with tab_execucoes:
+        _run_history()
 
 
 def _headline_metrics(funnel_df: pd.DataFrame) -> None:
@@ -280,4 +283,43 @@ def _metadata_coverage_by_layer() -> None:
         caption="Mostra o que cada camada ganha e perde: gold projeta silver descartando `issn`, `volume`, "
         "`issue`, `pages` e as flags de qualidade — mas mantém `sources` (adicionado nesta refatoração) "
         "para permitir a quebra IEEE/Elsevier também no gold.",
+    )
+
+
+def _run_history() -> None:
+    """Durable per-stage run history (`raw.lit_pipeline_runs`).
+
+    Complements the Airflow run list in the sidebar, which only covers runs
+    this browser session triggered and disappears when Airflow is down.
+    """
+    runs = loaders.pipeline_runs()
+    if runs.empty:
+        st.info(
+            "Nenhuma execução registrada ainda. Toda execução de estágio passa a ser gravada em "
+            "`raw.lit_pipeline_runs` — rode o pipeline pela barra lateral ou por "
+            "`uv run lake-literature --stage all`."
+        )
+        return
+
+    table = runs.copy()
+    table["duração (s)"] = (
+        pd.to_datetime(table["finished_at"]) - pd.to_datetime(table["started_at"])
+    ).dt.total_seconds()
+    table["stats"] = table["stats"].astype(str).str.slice(0, 160)
+    st.dataframe(
+        table[["stage", "started_at", "duração (s)", "status", "stats", "error"]],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "stage": st.column_config.TextColumn("Etapa"),
+            "started_at": st.column_config.DatetimeColumn("Início", format="DD/MM/YYYY HH:mm:ss"),
+            "duração (s)": st.column_config.NumberColumn("Duração (s)", format="%.1f"),
+            "status": st.column_config.TextColumn("Status"),
+            "stats": st.column_config.TextColumn("Estatísticas", width="large"),
+            "error": st.column_config.TextColumn("Erro"),
+        },
+    )
+    st.caption(
+        "Gravado por `pipeline.py` a cada execução de estágio, venha ela do CLI ou de uma task do "
+        "Airflow (que chama o mesmo CLI)."
     )

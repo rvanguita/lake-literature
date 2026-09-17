@@ -16,7 +16,13 @@ from lake_literature.dashboard.analytics import (
     valid_years,
 )
 from lake_literature.dashboard.charts import lorenz_chart
-from lake_literature.dashboard.components import hero_banner, metric_row, page_header, render_chart
+from lake_literature.dashboard.components import (
+    hero_banner,
+    metric_row,
+    page_header,
+    render_chart,
+    require_columns,
+)
 from lake_literature.dashboard.theme import SOURCE_COLORS, TREND_DOWN_COLOR, TREND_UP_COLOR
 
 
@@ -29,8 +35,8 @@ def render() -> None:
         "camadas raw → bronze → silver → gold.",
     )
 
-    layer, _ = loaders.filtered_articles()
     articles_df = loaders.require_articles()
+    layer, _ = loaders.articles()  # just the active layer's name, for the banner
     chunks_df = loaders.filtered_chunks()
 
     years_df = _years(articles_df)
@@ -104,8 +110,7 @@ def _charts_grid(articles_df: pd.DataFrame, years_df: pd.DataFrame) -> None:
 
 def _source_distribution_pie(articles_df: pd.DataFrame) -> None:
     st.subheader("Distribuição por Base / Fonte")
-    if "source" not in articles_df.columns:
-        st.info("Coluna 'source' não disponível nesta camada.")
+    if not require_columns(articles_df, ["source"], "Coluna 'source' não disponível nesta camada."):
         return
 
     by_source = articles_df["source"].value_counts().rename_axis("source").reset_index(name="count")

@@ -81,9 +81,9 @@ def ingest_uploaded_file(path: Path) -> dict:
     session = get_session("raw")
     try:
         if path.suffix.lower() == ".csv":
-            written = load_ieee_csv(session)
-            return {"ieee_csv_rows": written}
-        written = load_bib_entries(session)
-        return {"bib_entries": written}
+            stats = load_ieee_csv(session)
+            return {"ieee_csv_rows": stats["rows"], "failed_files": stats["failed_files"]}
+        stats = load_bib_entries(session)
+        return {"bib_entries": stats["entries"], "failed_files": stats["failed_files"]}
     finally:
         session.close()

@@ -22,10 +22,14 @@ from lake_literature.dashboard.data import (
     load_chunk_search_data,
     load_chunks,
     load_duplicate_pairs,
+    load_pipeline_runs,
     load_search_configs,
     load_semantics,
     pick_best_articles_layer,
     raw_funnel_counts,
+)
+from lake_literature.dashboard.data import (
+    semantic_freshness as _semantic_freshness,
 )
 
 
@@ -80,6 +84,12 @@ def chunk_search_data() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60)
+def pipeline_runs() -> pd.DataFrame:
+    """Recent pipeline stage executions (see `data.load_pipeline_runs`)."""
+    return load_pipeline_runs()
+
+
+@st.cache_data(ttl=60)
 def search_configs() -> pd.DataFrame:
     return load_search_configs()
 
@@ -93,6 +103,12 @@ def semantics() -> pd.DataFrame:
     expecting it as a column of the active layer.
     """
     return load_semantics()
+
+
+@st.cache_data(ttl=60)
+def semantic_freshness() -> dict:
+    """Whether the semantic signals still match the embeddings behind them."""
+    return _semantic_freshness()
 
 
 @st.cache_data(ttl=60)

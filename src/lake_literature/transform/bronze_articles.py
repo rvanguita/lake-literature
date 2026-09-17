@@ -111,6 +111,14 @@ def _to_int(value) -> int | None:
 
 
 def _upsert(session: Session, source: str, source_id: str, **fields) -> None:
+    """Insert or update the bronze row for `(source, source_id)`.
+
+    Every key in `fields` is written as given, `None` included -- so a caller
+    that doesn't have a value must *omit* the key rather than pass None, or the
+    re-run will erase whatever is already stored there (this is how every
+    Elsevier citation count used to be wiped on each bronze build, and why
+    `_enrich_citation_counts` had to repair them afterwards).
+    """
     existing = session.scalar(
         select(BronzeArticle).where(
             BronzeArticle.source == source, BronzeArticle.source_id == source_id
@@ -212,8 +220,9 @@ def _build_ieee_records(raw_session: Session, bronze_session: Session) -> int:
             url=f.get("url"),
             abstract=f.get("abstract"),
             keywords=_split_keywords(f.get("keywords"), ";"),
-            citation_count=None,
-            reference_count=None,
+            # citation/reference counts deliberately omitted: neither the
+            # Elsevier .bib nor a bare IEEE .bib entry carries them, and
+            # passing None would erase what the enrichment step already filled.
             raw_csv_id=None,
             raw_bib_id=entry.id,
         )
@@ -246,8 +255,9 @@ def _build_elsevier_records(raw_session: Session, bronze_session: Session) -> in
             url=f.get("url"),
             abstract=f.get("abstract"),
             keywords=_split_keywords(f.get("keywords"), ","),
-            citation_count=None,
-            reference_count=None,
+            # citation/reference counts deliberately omitted: neither the
+            # Elsevier .bib nor a bare IEEE .bib entry carries them, and
+            # passing None would erase what the enrichment step already filled.
             raw_csv_id=None,
             raw_bib_id=entry.id,
         )
@@ -256,14 +266,14 @@ def _build_elsevier_records(raw_session: Session, bronze_session: Session) -> in
     return written
 
 
-def _enrich_citation_counts(bronze_session: Session) -> int:
+def _enrich_citation_counts(bronze_session: Session, raw_session: Session) -> int:
     """Backfill citation_count/reference_count from the enrichment cache.
 
     Only fills a field that is currently NULL -- the IEEE CSV's own counts
     are the authoritative source where they exist and must never be
     overwritten by the cache.
     """
-    cache = load_enrichment_cache()
+    cache = load_enrichment_cache(raw_session)
     if not cache:
         return 0
 
@@ -292,6 +302,6 @@ def build_bronze_articles(raw_session: Session, bronze_session: Session) -> dict
     written = _build_ieee_records(raw_session, bronze_session)
     written += _build_elsevier_records(raw_session, bronze_session)
     bronze_session.flush()
-    enriched = _enrich_citation_counts(bronze_session)
+    enriched = _enrich_citation_counts(bronze_session, raw_session)
     bronze_session.commit()
     return {"written": written, "enriched": enriched}

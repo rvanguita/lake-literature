@@ -12,6 +12,8 @@ import datetime as dt
 from sqlalchemy import JSON, Date, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from lake_literature.db import utcnow
+
 
 class Base(DeclarativeBase):
     pass
@@ -51,6 +53,6 @@ class Article(Base):
     raw_bib_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_csv_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("source", "source_id", name="uq_source_record"),)

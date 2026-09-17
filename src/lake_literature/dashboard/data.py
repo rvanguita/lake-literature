@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 LAYER_TABLES = {
     "raw": [
+        "lit_pipeline_runs",
         "lit_source_files",
         "lit_config",
         "lit_ieee_csv_rows",
@@ -70,6 +71,26 @@ def load_articles(layer: str) -> pd.DataFrame:
         return pd.DataFrame()
     engine = get_engine(layer)
     return pd.read_sql_table("lit_articles", engine)
+
+
+def load_pipeline_runs(limit: int = 50) -> pd.DataFrame:
+    """Most recent stage executions from `raw.lit_pipeline_runs`, newest first.
+
+    Written by `pipeline.py`'s `_recorded` wrapper, so it covers runs started
+    from the CLI as well as from Airflow (whose tasks shell out to that CLI) --
+    unlike Airflow's own history, which only sees what it triggered.
+    """
+    if not table_exists("raw", "lit_pipeline_runs"):
+        return pd.DataFrame()
+    engine = get_engine("raw")
+    return pd.read_sql_query(
+        text(
+            "SELECT stage, started_at, finished_at, status, stats, error "
+            "FROM `lit_pipeline_runs` ORDER BY started_at DESC LIMIT :limit"
+        ),
+        engine,
+        params={"limit": limit},
+    )
 
 
 def load_search_configs() -> pd.DataFrame:
@@ -126,6 +147,74 @@ def load_semantics() -> pd.DataFrame:
     if not table_exists("gold", "lit_semantics"):
         return pd.DataFrame()
     return pd.read_sql_table("lit_semantics", get_engine("gold"))
+
+
+def semantic_freshness() -> dict:
+    """How well `lit_semantics` still matches the embeddings it was derived from.
+
+    `--stage gold` rebuilds the chunks, and a chunk whose text changed loses its
+    vector (see `transform/gold_articles.py`). A `semantic` run made before that
+    therefore describes a corpus state that may no longer exist -- which is
+    exactly what happened in production and was invisible in the UI, because
+    every page renders `lit_semantics` without checking whether the embeddings
+    behind it are still there.
+
+    `orphaned` counts semantic rows whose article no longer has an embedded
+    abstract chunk; `coverage` is how much of the corpus the `embed` stage has
+    actually processed.
+    """
+    result = {
+        "available": False,
+        "abstract_chunks": 0,
+        "embedded_abstract_chunks": 0,
+        "coverage": 0.0,
+        "semantics_rows": 0,
+        "orphaned": 0,
+        "is_stale": False,
+    }
+    if not table_exists("gold", "lit_chunks"):
+        return result
+
+    try:
+        engine = get_engine("gold")
+        with engine.connect() as conn:
+            total, embedded = conn.execute(
+                text(
+                    "SELECT COUNT(*), SUM(embedding IS NOT NULL) FROM `lit_chunks` "
+                    "WHERE chunk_type = 'abstract'"
+                )
+            ).one()
+            result["abstract_chunks"] = int(total or 0)
+            result["embedded_abstract_chunks"] = int(embedded or 0)
+            result["coverage"] = (
+                result["embedded_abstract_chunks"] / result["abstract_chunks"]
+                if result["abstract_chunks"]
+                else 0.0
+            )
+
+            if inspect(engine).has_table("lit_semantics"):
+                result["semantics_rows"] = (
+                    conn.execute(text("SELECT COUNT(*) FROM `lit_semantics`")).scalar() or 0
+                )
+                result["orphaned"] = (
+                    conn.execute(
+                        text(
+                            "SELECT COUNT(*) FROM `lit_semantics` s WHERE NOT EXISTS ("
+                            "SELECT 1 FROM `lit_chunks` c WHERE c.doi = s.doi "
+                            "AND c.chunk_type = 'abstract' AND c.embedding IS NOT NULL)"
+                        )
+                    ).scalar()
+                    or 0
+                )
+        result["available"] = True
+    except SQLAlchemyError as exc:
+        logger.warning("semantic_freshness: database unreachable (%s)", exc)
+        return result
+
+    result["is_stale"] = result["semantics_rows"] > 0 and (
+        result["orphaned"] > 0 or result["coverage"] < 1.0
+    )
+    return result
 
 
 def load_duplicate_pairs() -> pd.DataFrame:

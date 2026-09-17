@@ -11,6 +11,7 @@ from lake_literature.dashboard import airflow_client
 
 STAGE_LABELS = {
     "raw": "Dados Brutos (Raw)",
+    "enrich": "Enriquecimento (Citações via API)",
     "bronze": "Bronze (Padronizado)",
     "silver": "Silver (Limpo e Deduplicado)",
     "gold": "Gold (RAG)",
@@ -21,6 +22,7 @@ STAGE_LABELS = {
 
 DAG_IDS = {
     "raw": "lake_literature_raw",
+    "enrich": "lake_literature_enrich",
     "bronze": "lake_literature_bronze",
     "silver": "lake_literature_silver",
     "gold": "lake_literature_gold",
@@ -31,7 +33,7 @@ DAG_IDS = {
 
 
 def trigger_stage(stage: str) -> dict:
-    """Trigger the DAG for `stage` (one of raw/bronze/silver/gold/all).
+    """Trigger the DAG for `stage` (one of raw/enrich/bronze/silver/gold/embed/semantic/all).
 
     Returns a run reference to keep in session state and pass to `poll_run`:
     `{"stage": ..., "dag_id": ..., "dag_run_id": ..., "state": "queued"}`.

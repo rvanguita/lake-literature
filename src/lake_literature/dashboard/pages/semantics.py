@@ -14,8 +14,9 @@ from lake_literature.dashboard.components import (
     page_header,
     render_chart,
     require_columns,
+    semantic_staleness_notice,
 )
-from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, TREND_DOWN_COLOR
+from lake_literature.dashboard.theme import CATEGORICAL_PALETTE
 
 LOW_RELEVANCE_PERCENTILE = 10
 TOP_REVIEW_ROWS = 40
@@ -28,6 +29,8 @@ def render() -> None:
         "Triagem de relevância, temas descobertos automaticamente e quase-duplicatas — tudo "
         "derivado dos embeddings dos resumos.",
     )
+
+    semantic_staleness_notice()
 
     signals = loaders.semantics()
     if signals.empty:
@@ -95,12 +98,6 @@ def _relevance_screening(scored: pd.DataFrame) -> None:
         title="Quão perto do tema da revisão está cada artigo",
         labels={"relevance_score": "Score de relevância (cosseno)", "count": "Artigos"},
         color_discrete_sequence=[CATEGORICAL_PALETTE[0]],
-    )
-    fig.add_vline(
-        x=threshold,
-        line_dash="dash",
-        line_color=TREND_DOWN_COLOR,
-        annotation_text=f"percentil {LOW_RELEVANCE_PERCENTILE}",
     )
     fig.update_layout(
         xaxis_title="Score de relevância (1,0 = idêntico ao tema-âncora)",
@@ -206,8 +203,7 @@ def _themes(scored: pd.DataFrame) -> None:
 
     st.divider()
     st.subheader("Evolução dos temas ao longo do tempo")
-    if "year" not in scored.columns:
-        st.info("Coluna 'year' não disponível nesta camada.")
+    if not require_columns(scored, ["year"], "Coluna 'year' não disponível nesta camada."):
         return
     yearly = scored.dropna(subset=["year"]).copy()
     yearly["year"] = pd.to_numeric(yearly["year"], errors="coerce")

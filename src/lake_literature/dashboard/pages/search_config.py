@@ -7,7 +7,7 @@ import streamlit as st
 
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.components import hero_banner, page_header
-from lake_literature.dashboard.theme import SOURCE_COLORS, SOURCE_LABELS
+from lake_literature.dashboard.theme import OTHER_COLOR, SOURCE_COLORS, SOURCE_LABELS
 from lake_literature.ingest.raw_upload import (
     SOURCE_UPLOAD_SPECS,
     RawUploadError,
@@ -51,7 +51,7 @@ _SOURCE_EMOJI = {"ieee": "🔷", "elsevier": "🟠"}
 def _source_card(row: pd.Series) -> None:
     source = row.get("source", "")
     label = SOURCE_LABELS.get(source, source)
-    color = SOURCE_COLORS.get(source, "#9a9a94")
+    color = SOURCE_COLORS.get(source, OTHER_COLOR)
 
     st.markdown(
         f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">● {label}</span>',

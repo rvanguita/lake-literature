@@ -11,6 +11,8 @@ import datetime as dt
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from lake_literature.db import utcnow
+
 
 class Base(DeclarativeBase):
     pass
@@ -59,4 +61,4 @@ class Article(Base):
         JSON, default=list
     )  # source bronze.articles ids merged
 
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

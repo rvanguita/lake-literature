@@ -25,6 +25,19 @@ EMBED_BATCH_SIZE = 256
 ProgressCallback = Callable[[int, int], None]
 
 
+def _ordered_by_ids(chunks, batch_ids):
+    """`chunks` in `batch_ids` order, skipping ids that came back empty.
+
+    The vectors produced below are zipped positionally against this list, so a
+    row landing at the wrong index would attach one chunk's embedding to
+    another's text -- and `IN (...)` gives no ordering guarantee of its own.
+    Pulled out of the batch loop so that alignment can be tested directly,
+    without the embedding model.
+    """
+    chunks_by_id = {c.id: c for c in chunks}
+    return [chunks_by_id[i] for i in batch_ids if i in chunks_by_id]
+
+
 def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None = None) -> dict:
     """Embed every chunk that doesn't have a vector yet.
 
@@ -51,9 +64,7 @@ def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None
     for start in range(0, total_pending, EMBED_BATCH_SIZE):
         batch_ids = pending_ids[start : start + EMBED_BATCH_SIZE]
         chunks = gold_session.scalars(select(Chunk).where(Chunk.id.in_(batch_ids))).all()
-        # Preserve batch_ids order so texts and chunks line up 1:1 for zip below.
-        chunks_by_id = {c.id: c for c in chunks}
-        ordered_chunks = [chunks_by_id[i] for i in batch_ids if i in chunks_by_id]
+        ordered_chunks = _ordered_by_ids(chunks, batch_ids)
         texts = [c.text for c in ordered_chunks]
 
         vectors = model.embed(texts)

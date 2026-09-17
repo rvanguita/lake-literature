@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from lake_literature.db.gold_models import Chunk, DuplicatePair, Semantics
@@ -168,8 +168,35 @@ def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> di
         .order_by(Chunk.doi)
     ).all()
 
+    # Coverage, not just presence: this stage used to run happily on whatever
+    # subset happened to be embedded, so a `gold` rebuild followed by a partial
+    # `embed` produced a full-looking `lit_semantics` derived from a fraction of
+    # the corpus, with nothing saying so.
+    total_abstracts = (
+        gold_session.scalar(
+            select(func.count()).select_from(Chunk).where(Chunk.chunk_type == "abstract")
+        )
+        or 0
+    )
+    coverage = len(rows) / total_abstracts if total_abstracts else 0.0
+
     if not rows:
-        return {"articles": 0, "themes": 0, "duplicate_pairs": 0, "skipped": "no embeddings yet"}
+        return {
+            "articles": 0,
+            "themes": 0,
+            "duplicate_pairs": 0,
+            "embedding_coverage": 0.0,
+            "skipped": "no embeddings yet",
+        }
+
+    if coverage < 1.0:
+        logger.warning(
+            "build_semantics: only %d of %d abstract chunks are embedded (%.1f%%) -- "
+            "the signals written here describe that subset only; run `--stage embed` first",
+            len(rows),
+            total_abstracts,
+            coverage * 100,
+        )
 
     dois = [r[0] for r in rows]
     matrix = np.array([r[1] for r in rows], dtype="float32")
@@ -203,5 +230,6 @@ def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> di
         "articles": len(dois),
         "themes": len(theme_labels),
         "duplicate_pairs": len(pairs),
+        "embedding_coverage": round(coverage, 4),
         "median_relevance": round(float(np.median(scores)), 4),
     }
