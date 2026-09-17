@@ -47,11 +47,14 @@ MIN_PAPERS_FOR_NETWORK = 4
 TOP_NETWORK_AUTHORS = 18
 
 
-@st.cache_data(
-    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
-)
-def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
+# Both helpers take `loaders.filter_signature()` rather than the frame itself:
+# hashing the frame meant serializing ~3.5MB to JSON on every cache lookup,
+# which cost more than the work being cached. They re-read the filtered frame
+# internally, so the signature fully determines the result.
+@st.cache_data(ttl=60)
+def _author_table(filter_sig: tuple) -> pd.DataFrame:
     """Explode authors (with byline position), canonicalize identity, keep one display name per key."""
+    _, articles_df = loaders.filtered_articles()
     exploded = explode_authors_with_position(articles_df)
     if exploded.empty:
         return exploded
@@ -62,10 +65,9 @@ def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     return exploded
 
 
-@st.cache_data(
-    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
-)
-def _author_year_matrix_cached(articles_df: pd.DataFrame) -> pd.DataFrame:
+@st.cache_data(ttl=60)
+def _author_year_matrix_cached(filter_sig: tuple) -> pd.DataFrame:
+    _, articles_df = loaders.filtered_articles()
     return author_year_matrix(articles_df)
 
 
@@ -77,7 +79,7 @@ def render() -> None:
     )
 
     articles_df = loaders.require_articles()
-    author_rows = _author_table(articles_df)
+    author_rows = _author_table(loaders.filter_signature())
 
     if author_rows.empty:
         st.info("Coluna 'authors' não disponível ou vazia nesta camada.")
@@ -119,39 +121,111 @@ def render() -> None:
     )
 
     with tab_ranking:
-        _top_authors(author_rows)
-        st.divider()
-        _lead_authors_ranking(author_rows)
+        sub_prolific, sub_lead = st.tabs(["✍️ Mais Prolíficos", "🥇 1º/2º Autor"])
+        with sub_prolific:
+            _top_authors(author_rows)
+        with sub_lead:
+            _lead_authors_ranking(author_rows)
 
     with tab_production:
-        _researchers_by_year(articles_df)
-        st.divider()
-        _cumulative_researchers_chart(articles_df)
-        st.divider()
-        _lead_authors_by_year(articles_df)
-        st.divider()
-        _cumulative_lead_authors_chart(articles_df)
-        st.divider()
-        _production_heatmap(author_rows)
-        st.divider()
-        _emerging_vs_established(author_rows)
+        (
+            sub_by_year,
+            sub_cumulative,
+            sub_lead_year,
+            sub_lead_cumulative,
+            sub_heatmap,
+            sub_emerging,
+        ) = st.tabs(
+            [
+                "👥 Pesquisadores/Ano",
+                "📈 Acumulado",
+                "🥇 1º/2º Autores/Ano",
+                "📈 1º/2º Acumulado",
+                "🗓️ Heatmap Top Autores",
+                "🌱 Emergentes vs. Consolidados",
+            ]
+        )
+        with sub_by_year:
+            _researchers_by_year(articles_df)
+        with sub_cumulative:
+            _cumulative_researchers_chart(articles_df)
+        with sub_lead_year:
+            _lead_authors_by_year(articles_df)
+        with sub_lead_cumulative:
+            _cumulative_lead_authors_chart(articles_df)
+        with sub_heatmap:
+            _production_heatmap(author_rows)
+        with sub_emerging:
+            _emerging_vs_established(author_rows)
 
     with tab_collab:
         _coauthorship_network(author_rows)
 
     with tab_explore:
-        _research_line_leaders(author_rows, articles_df)
-        st.divider()
-        _author_keyword_profile(author_rows, articles_df)
+        (
+            sub_leaders,
+            sub_trend,
+            sub_kw_year,
+            sub_kw_cum,
+            sub_kw_profile,
+            sub_kw_shift,
+        ) = st.tabs(
+            [
+                "🔎 Líderes da Linha",
+                "📈 Trajetória Anual",
+                "👥 Pesquisadores/Ano",
+                "📈 Pesquisadores Acumulados",
+                "🏷️ Perfil de Palavras-Chave",
+                "🔀 Mudança de Foco",
+            ]
+        )
+        selected_kw, scoped_authors, dois_with_kw = _research_line_selector(
+            author_rows, articles_df
+        )
+        with sub_leaders:
+            if selected_kw:
+                _research_line_top_authors(selected_kw, scoped_authors)
+        with sub_trend:
+            if selected_kw:
+                _research_line_trend(selected_kw, scoped_authors)
+        with sub_kw_year:
+            if selected_kw:
+                _research_line_researchers_by_year(selected_kw, articles_df, dois_with_kw)
+        with sub_kw_cum:
+            if selected_kw:
+                _research_line_researchers_cumulative(selected_kw, articles_df, dois_with_kw)
+                _research_line_articles(articles_df, scoped_authors, selected_kw)
+
+        selected_author = _author_keyword_selector(author_rows)
+        working_kw = (
+            _author_keyword_working(selected_author, author_rows, articles_df)
+            if selected_author
+            else None
+        )
+        with sub_kw_profile:
+            if working_kw is not None:
+                _author_keyword_overview(selected_author, working_kw)
+        with sub_kw_shift:
+            if working_kw is not None:
+                _author_keyword_shift(working_kw)
 
     with tab_stats:
-        matrix = _full_output_table(articles_df)
-        st.divider()
-        _concentration_analysis(matrix)
-        st.divider()
-        _productivity_trend(matrix)
-        st.divider()
-        _volume_vs_impact(author_rows)
+        sub_table, sub_concentration, sub_trend_table, sub_vs_impact = st.tabs(
+            [
+                "📋 Tabela Completa",
+                "📐 Concentração (Gini/Lorenz)",
+                "📈 Tendência de Produtividade",
+                "📊 Volume × Impacto",
+            ]
+        )
+        with sub_table:
+            matrix = _full_output_table(articles_df)
+        with sub_concentration:
+            _concentration_analysis(matrix)
+        with sub_trend_table:
+            _productivity_trend(matrix)
+        with sub_vs_impact:
+            _volume_vs_impact(author_rows)
 
 
 def _top_authors(author_rows: pd.DataFrame) -> None:
@@ -451,7 +525,7 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
 
 def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     st.subheader("📋 Produção completa por autor e ano")
-    matrix = _author_year_matrix_cached(articles_df)
+    matrix = _author_year_matrix_cached(loaders.filter_signature())
     if matrix.empty:
         st.info("Sem anos válidos para montar a tabela.")
         return matrix
@@ -675,17 +749,24 @@ def _coauthorship_network(author_rows: pd.DataFrame) -> None:
     )
 
 
-def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame) -> None:
+def _research_line_selector(
+    author_rows: pd.DataFrame, articles_df: pd.DataFrame
+) -> tuple[str | None, pd.DataFrame, set]:
+    """Shared keyword selector for all "Exploração" research-line sub-tabs.
+
+    Returns `(selected_keyword, scoped_authors, dois_with_kw)`; `selected_keyword`
+    is None when there's nothing to show (missing data or no valid selection).
+    """
     st.subheader("🔎 Quem lidera esta linha de pesquisa")
     kw_exploded = explode_keywords(articles_df)
     if kw_exploded.empty:
         st.info("Coluna 'keywords' não disponível nesta camada.")
-        return
+        return None, author_rows.iloc[0:0], set()
 
     top_keywords = kw_exploded["keyword"].value_counts().head(60).index.tolist()
     selected = st.selectbox("Selecione uma palavra-chave:", options=top_keywords)
     if not selected:
-        return
+        return None, author_rows.iloc[0:0], set()
 
     dois_with_kw = set(kw_exploded.loc[kw_exploded["keyword"] == selected, "doi"].dropna())
     scoped_authors = (
@@ -695,75 +776,90 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
     )
     if scoped_authors.empty:
         st.info("Nenhum autor associado a esse termo nesta camada.")
-        return
+        return None, scoped_authors, dois_with_kw
 
+    return selected, scoped_authors, dois_with_kw
+
+
+def _research_line_top_authors(selected: str, scoped_authors: pd.DataFrame) -> None:
     leaders = (
         scoped_authors.groupby("author_display")["doi"]
         .nunique()
         .sort_values(ascending=False)
         .head(10)
     )
-    col_leaders, col_trend = st.columns(2)
-    with col_leaders:
-        fig = topn_hbar(
-            leaders, title=f"Autores mais produtivos em '{selected}'", x_title="Artigos"
-        )
-        render_chart(fig)
-    with col_trend:
-        trend_df = scoped_authors.copy()
-        trend_df["year"] = valid_years(trend_df)
-        trend_df = trend_df.dropna(subset=["year"]).astype({"year": int})
-        if trend_df.empty:
-            st.info("Sem anos válidos para a trajetória.")
-        else:
-            by_year = trend_df.groupby("year")["doi"].nunique().reset_index(name="articles")
-            fig = px.line(
-                by_year,
-                x="year",
-                y="articles",
-                markers=True,
-                title=f"Trajetória anual de '{selected}'",
-                labels={"year": "Ano", "articles": "Artigos"},
-            )
-            fig.update_traces(line_color=CATEGORICAL_PALETTE[2])
-            render_chart(fig)
+    fig = topn_hbar(leaders, title=f"Autores mais produtivos em '{selected}'", x_title="Artigos")
+    render_chart(fig)
 
-    st.divider()
+
+def _research_line_trend(selected: str, scoped_authors: pd.DataFrame) -> None:
+    trend_df = scoped_authors.copy()
+    trend_df["year"] = valid_years(trend_df)
+    trend_df = trend_df.dropna(subset=["year"]).astype({"year": int})
+    if trend_df.empty:
+        st.info("Sem anos válidos para a trajetória.")
+        return
+
+    by_year = trend_df.groupby("year")["doi"].nunique().reset_index(name="articles")
+    fig = px.line(
+        by_year,
+        x="year",
+        y="articles",
+        markers=True,
+        title=f"Trajetória anual de '{selected}'",
+        labels={"year": "Ano", "articles": "Artigos"},
+    )
+    fig.update_traces(line_color=CATEGORICAL_PALETTE[2])
+    render_chart(fig)
+
+
+def _research_line_researchers_by_year(
+    selected: str, articles_df: pd.DataFrame, dois_with_kw: set
+) -> None:
     keyword_articles = articles_df[articles_df["doi"].isin(dois_with_kw)]
     kw_by_year = researchers_by_year(keyword_articles)
-    kw_cum = cumulative_researchers(keyword_articles)
-    col_kw_year, col_kw_cum = st.columns(2)
-    with col_kw_year:
-        if kw_by_year.empty:
-            st.info("Sem anos válidos para este gráfico.")
-        else:
-            fig = source_bars(kw_by_year, "year", total_line=True)
-            fig.update_layout(
-                hovermode="x unified",
-                xaxis_title="Ano de publicação",
-                yaxis_title="Pesquisadores distintos",
-            )
-            render_chart(
-                fig,
-                caption=f"Pesquisadores distintos que publicaram em '{selected}' a cada ano, por base.",
-            )
-    with col_kw_cum:
-        if kw_cum.empty:
-            st.info("Sem anos válidos para o acumulado.")
-        else:
-            fig = source_lines(
-                kw_cum,
-                "year",
-                title=f"Pesquisadores acumulados em '{selected}'",
-                y_title="Pesquisadores acumulados",
-            )
-            fig.update_layout(xaxis_title="Ano de publicação")
-            render_chart(
-                fig,
-                caption="Total acumulado de pesquisadores distintos que já publicaram em "
-                f"'{selected}' até cada ano ({int(kw_cum['total'].iloc[-1]):,} ao final do período).",
-            )
+    if kw_by_year.empty:
+        st.info("Sem anos válidos para este gráfico.")
+        return
 
+    fig = source_bars(kw_by_year, "year", total_line=True)
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Pesquisadores distintos",
+    )
+    render_chart(
+        fig,
+        caption=f"Pesquisadores distintos que publicaram em '{selected}' a cada ano, por base.",
+    )
+
+
+def _research_line_researchers_cumulative(
+    selected: str, articles_df: pd.DataFrame, dois_with_kw: set
+) -> None:
+    keyword_articles = articles_df[articles_df["doi"].isin(dois_with_kw)]
+    kw_cum = cumulative_researchers(keyword_articles)
+    if kw_cum.empty:
+        st.info("Sem anos válidos para o acumulado.")
+        return
+
+    fig = source_lines(
+        kw_cum,
+        "year",
+        title=f"Pesquisadores acumulados em '{selected}'",
+        y_title="Pesquisadores acumulados",
+    )
+    fig.update_layout(xaxis_title="Ano de publicação")
+    render_chart(
+        fig,
+        caption="Total acumulado de pesquisadores distintos que já publicaram em "
+        f"'{selected}' até cada ano ({int(kw_cum['total'].iloc[-1]):,} ao final do período).",
+    )
+
+
+def _research_line_articles(
+    articles_df: pd.DataFrame, scoped_authors: pd.DataFrame, selected: str
+) -> None:
     top_dois = scoped_authors["doi"].unique()
     subset = articles_df[articles_df["doi"].isin(top_dois)]
     if "citation_count" in subset.columns:
@@ -775,7 +871,8 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
     )
 
 
-def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame) -> None:
+def _author_keyword_selector(author_rows: pd.DataFrame) -> str | None:
+    """Shared author selector for the "Perfil de Palavras-Chave"/"Mudança de Foco" sub-tabs."""
     st.subheader("🏷️ Perfil de palavras-chave por autor")
     counts = (
         author_rows.groupby("author_display")["doi"].nunique()
@@ -785,14 +882,17 @@ def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame
     eligible = counts[counts >= 3].sort_values(ascending=False)
     if eligible.empty:
         st.info("Nenhum autor com pelo menos 3 artigos nesta camada.")
-        return
+        return None
 
     selected_author = st.selectbox(
         "Selecione um autor (mínimo 3 artigos):", options=eligible.index.tolist()
     )
-    if not selected_author:
-        return
+    return selected_author or None
 
+
+def _author_keyword_working(
+    selected_author: str, author_rows: pd.DataFrame, articles_df: pd.DataFrame
+) -> pd.DataFrame | None:
     author_dois = set(
         author_rows.loc[author_rows["author_display"] == selected_author, "doi"].dropna()
     )
@@ -800,52 +900,55 @@ def _author_keyword_profile(author_rows: pd.DataFrame, articles_df: pd.DataFrame
     kw_exploded = explode_keywords(subset)
     if kw_exploded.empty:
         st.info(f"Nenhuma palavra-chave registrada para {selected_author}.")
-        return
+        return None
 
     working = kw_exploded.copy()
     working["year"] = valid_years(working)
-    working = working.dropna(subset=["year"]).astype({"year": int})
-    top_terms = working["keyword"].value_counts().head(10)
+    return working.dropna(subset=["year"]).astype({"year": int})
 
-    col_overall, col_shift = st.columns(2)
-    with col_overall:
-        fig = topn_hbar(
-            top_terms, title=f"Palavras-chave dominantes de {selected_author}", x_title="Menções"
-        )
-        render_chart(fig)
-    with col_shift:
-        if working["year"].nunique() < 2:
-            st.info("Anos insuficientes para comparar início vs. fim da carreira no corpus.")
-        else:
-            split_year = int(working["year"].median())
-            early = working[working["year"] <= split_year]["keyword"].value_counts()
-            late = working[working["year"] > split_year]["keyword"].value_counts()
-            all_terms = set(early.index) | set(late.index)
-            compare = pd.DataFrame(
-                {
-                    "early": early.reindex(all_terms, fill_value=0),
-                    "late": late.reindex(all_terms, fill_value=0),
-                }
-            )
-            compare = (
-                compare[(compare["early"] + compare["late"]) > 0]
-                .sort_values("late", ascending=False)
-                .head(10)
-            )
-            fig = go.Figure()
-            fig.add_bar(
-                x=compare.index,
-                y=compare["early"],
-                name=f"até {split_year}",
-                marker_color=CATEGORICAL_PALETTE[0],
-            )
-            fig.add_bar(
-                x=compare.index,
-                y=compare["late"],
-                name=f"após {split_year}",
-                marker_color=CATEGORICAL_PALETTE[2],
-            )
-            fig.update_layout(
-                barmode="group", title="Mudança de foco: início vs. fim da carreira no corpus"
-            )
-            render_chart(fig)
+
+def _author_keyword_overview(selected_author: str, working: pd.DataFrame) -> None:
+    top_terms = working["keyword"].value_counts().head(10)
+    fig = topn_hbar(
+        top_terms, title=f"Palavras-chave dominantes de {selected_author}", x_title="Menções"
+    )
+    render_chart(fig)
+
+
+def _author_keyword_shift(working: pd.DataFrame) -> None:
+    if working["year"].nunique() < 2:
+        st.info("Anos insuficientes para comparar início vs. fim da carreira no corpus.")
+        return
+
+    split_year = int(working["year"].median())
+    early = working[working["year"] <= split_year]["keyword"].value_counts()
+    late = working[working["year"] > split_year]["keyword"].value_counts()
+    all_terms = set(early.index) | set(late.index)
+    compare = pd.DataFrame(
+        {
+            "early": early.reindex(all_terms, fill_value=0),
+            "late": late.reindex(all_terms, fill_value=0),
+        }
+    )
+    compare = (
+        compare[(compare["early"] + compare["late"]) > 0]
+        .sort_values("late", ascending=False)
+        .head(10)
+    )
+    fig = go.Figure()
+    fig.add_bar(
+        x=compare.index,
+        y=compare["early"],
+        name=f"até {split_year}",
+        marker_color=CATEGORICAL_PALETTE[0],
+    )
+    fig.add_bar(
+        x=compare.index,
+        y=compare["late"],
+        name=f"após {split_year}",
+        marker_color=CATEGORICAL_PALETTE[2],
+    )
+    fig.update_layout(
+        barmode="group", title="Mudança de foco: início vs. fim da carreira no corpus"
+    )
+    render_chart(fig)

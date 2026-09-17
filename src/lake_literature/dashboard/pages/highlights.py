@@ -40,33 +40,59 @@ def render() -> None:
     )
 
     with tab_refs:
-        _reference_distribution(articles_df)
-        st.divider()
-        _references_vs_citations(articles_df)
-        st.divider()
-        _top_referenced(articles_df)
+        ref_df = _reference_distribution_intro(articles_df)
+        sub_hist, sub_ecdf, sub_box, sub_vs_cit, sub_top = st.tabs(
+            [
+                "📊 Histograma",
+                "📈 ECDF",
+                "📦 Box Plot",
+                "🔗 Refs vs. Citações",
+                "📖 Mais Referenciados",
+            ]
+        )
+        with sub_hist:
+            if ref_df is not None:
+                _reference_histogram(ref_df)
+        with sub_ecdf:
+            if ref_df is not None:
+                _reference_ecdf(ref_df)
+        with sub_box:
+            if ref_df is not None:
+                _reference_box(ref_df)
+        with sub_vs_cit:
+            _references_vs_citations(articles_df)
+        with sub_top:
+            _top_referenced(articles_df)
 
     with tab_citations:
-        _top_cited(articles_df)
-        st.divider()
-        _cited_by_year(articles_df)
+        sub_cited, sub_by_year = st.tabs(["🏆 Mais Citados", "📅 Citados por Ano"])
+        with sub_cited:
+            _top_cited(articles_df)
+        with sub_by_year:
+            _cited_by_year(articles_df)
 
     with tab_collab:
         _collaboration_team_size(articles_df)
 
     with tab_rankings:
-        _top_authors(articles_df)
-        st.divider()
-        _venue_impact(articles_df)
+        sub_authors, sub_impact = st.tabs(["✍️ Autores Mais Prolíficos", "📈 Impacto por Periódico"])
+        with sub_authors:
+            _top_authors(articles_df)
+        with sub_impact:
+            _venue_impact(articles_df)
 
 
-def _reference_distribution(articles_df: pd.DataFrame) -> None:
+def _reference_distribution_intro(articles_df: pd.DataFrame) -> pd.DataFrame | None:
+    """Guard + shared metric row for the Histograma/ECDF/Box Plot sub-tabs.
+
+    Returns the cleaned `reference_count` frame, or None if there's nothing to show.
+    """
     st.subheader("📚 Quantidade de referências usadas por artigo (IEEE vs. Elsevier)")
     if not require_columns(articles_df, ["reference_count"]) or not (
         articles_df["reference_count"].notna().any()
     ):
         st.info("Nenhum artigo com contagem de referências disponível nesta camada.")
-        return
+        return None
 
     ref_df = articles_df.dropna(subset=["reference_count"]).copy()
     ref_df["reference_count"] = ref_df["reference_count"].astype(int)
@@ -102,90 +128,85 @@ def _reference_distribution(articles_df: pd.DataFrame) -> None:
             ("🔝 Maior Bibliografia", f"{max_refs:,} refs", f"{len(ref_df):,} artigos analisados"),
         ]
     )
-
-    tab_hist, tab_cdf, tab_box = st.tabs(
-        [
-            "📊 Histograma da distribuição",
-            "📈 Cumulativo",
-            "📦 Gráfico de Box Plot (Quartis e dispersão)",
-        ]
-    )
-
-    with tab_hist:
-        # In overlay mode, the last category painted sits on top -- draw the
-        # smaller-volume source last so its bars aren't hidden behind the
-        # larger one wherever their bins overlap.
-        source_order = (
-            ref_df["source"].value_counts().sort_values(ascending=False).index.tolist()
-            if "source" in ref_df.columns
-            else None
-        )
-        fig_hist = px.histogram(
-            ref_df,
-            x="reference_count",
-            color="source" if "source" in ref_df.columns else None,
-            barmode="overlay",
-            opacity=0.75,
-            nbins=40,
-            color_discrete_map=SOURCE_COLORS,
-            category_orders={"source": source_order} if source_order else None,
-            labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
-        )
-        fig_hist.update_traces(
-            hovertemplate="Intervalo: %{x} refs<br>Quantidade: %{y:,} artigos (%{data.name})<extra></extra>"
-        )
-        fig_hist.update_layout(
-            xaxis_title="Referências citadas por artigo (tamanho da bibliografia)",
-            yaxis_title="Quantidade de artigos",
-            hovermode="x unified",
-        )
-        render_chart(fig_hist)
-
-    with tab_cdf:
-        fig_cdf = px.ecdf(
-            ref_df,
-            x="reference_count",
-            color="source" if "source" in ref_df.columns else None,
-            color_discrete_map=SOURCE_COLORS,
-            ecdfnorm="percent",
-            labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
-        )
-        fig_cdf.update_traces(
-            hovertemplate="Até %{x} refs: %{y:.1f}% dos artigos (%{data.name})<extra></extra>"
-        )
-        fig_cdf.update_layout(
-            xaxis_title="Referências citadas por artigo (tamanho da bibliografia)",
-            yaxis_title="% acumulado de artigos",
-            hovermode="x unified",
-        )
-        render_chart(
-            fig_cdf,
-            caption="Cada ponto (x, y) lê-se: 'y% dos artigos têm até x referências citadas'.",
-        )
-
-    with tab_box:
-        fig_box = px.box(
-            ref_df,
-            x="source" if "source" in ref_df.columns else None,
-            y="reference_count",
-            color="source" if "source" in ref_df.columns else None,
-            color_discrete_map=SOURCE_COLORS,
-            points="outliers",
-            labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
-        )
-        fig_box.update_layout(
-            yaxis_title="Referências citadas por artigo",
-            xaxis_title="Base",
-            showlegend=False,
-        )
-        render_chart(fig_box)
-
     st.caption(
         "Distribuição do número de referências citadas por artigo — como histograma, curva cumulativa "
-        "(ECDF) e box plot. Os dados do IEEE têm origem direta no export CSV do IEEE Xplore "
-        "(`Reference Count`). Os dados da Elsevier foram enriquecidos via cache offline "
+        "(ECDF) e box plot, nas abas abaixo. Os dados do IEEE têm origem direta no export CSV do IEEE "
+        "Xplore (`Reference Count`). Os dados da Elsevier foram enriquecidos via cache offline "
         "(`data/enrichment_cache.json`); ver os cartões acima para as médias por base."
     )
+    return ref_df
+
+
+def _reference_histogram(ref_df: pd.DataFrame) -> None:
+    # In overlay mode, the last category painted sits on top -- draw the
+    # smaller-volume source last so its bars aren't hidden behind the
+    # larger one wherever their bins overlap.
+    source_order = (
+        ref_df["source"].value_counts().sort_values(ascending=False).index.tolist()
+        if "source" in ref_df.columns
+        else None
+    )
+    fig_hist = px.histogram(
+        ref_df,
+        x="reference_count",
+        color="source" if "source" in ref_df.columns else None,
+        barmode="overlay",
+        opacity=0.75,
+        nbins=40,
+        color_discrete_map=SOURCE_COLORS,
+        category_orders={"source": source_order} if source_order else None,
+        labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
+    )
+    fig_hist.update_traces(
+        hovertemplate="Intervalo: %{x} refs<br>Quantidade: %{y:,} artigos (%{data.name})<extra></extra>"
+    )
+    fig_hist.update_layout(
+        xaxis_title="Referências citadas por artigo (tamanho da bibliografia)",
+        yaxis_title="Quantidade de artigos",
+        hovermode="x unified",
+    )
+    render_chart(fig_hist)
+
+
+def _reference_ecdf(ref_df: pd.DataFrame) -> None:
+    fig_cdf = px.ecdf(
+        ref_df,
+        x="reference_count",
+        color="source" if "source" in ref_df.columns else None,
+        color_discrete_map=SOURCE_COLORS,
+        ecdfnorm="percent",
+        labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
+    )
+    fig_cdf.update_traces(
+        hovertemplate="Até %{x} refs: %{y:.1f}% dos artigos (%{data.name})<extra></extra>"
+    )
+    fig_cdf.update_layout(
+        xaxis_title="Referências citadas por artigo (tamanho da bibliografia)",
+        yaxis_title="% acumulado de artigos",
+        hovermode="x unified",
+    )
+    render_chart(
+        fig_cdf,
+        caption="Cada ponto (x, y) lê-se: 'y% dos artigos têm até x referências citadas'.",
+    )
+
+
+def _reference_box(ref_df: pd.DataFrame) -> None:
+    fig_box = px.box(
+        ref_df,
+        x="source" if "source" in ref_df.columns else None,
+        y="reference_count",
+        color="source" if "source" in ref_df.columns else None,
+        color_discrete_map=SOURCE_COLORS,
+        points="outliers",
+        labels={"reference_count": "Referências citadas por artigo", "source": "Base"},
+    )
+    fig_box.update_layout(
+        yaxis_title="Referências citadas por artigo",
+        xaxis_title="Base",
+        showlegend=False,
+    )
+    render_chart(fig_box)
 
 
 def _references_vs_citations(articles_df: pd.DataFrame) -> None:
@@ -367,6 +388,30 @@ def _cited_by_year(articles_df: pd.DataFrame) -> None:
     )
 
 
+def _modal_source(rows: pd.DataFrame, key: str, keys_shown) -> pd.Series | None:
+    """Most frequent `source` per entity, for the entities actually plotted.
+
+    Scoped to `keys_shown` first: the previous
+    `groupby(key)["source"].agg(lambda s: s.mode().iat[0])` ran a per-group
+    mode over every author/venue in the corpus (thousands of groups) just to
+    colour 15 bars. Ties resolve to the alphabetically first source, matching
+    `Series.mode()`, because the groupby output is sorted and the sort below
+    is stable.
+    """
+    if "source" not in rows.columns:
+        return None
+    scoped = rows[rows[key].isin(keys_shown)]
+    if scoped.empty:
+        return None
+    counts = scoped.groupby([key, "source"], observed=True).size()
+    return (
+        counts.sort_values(ascending=False)
+        .reset_index()
+        .drop_duplicates(key)
+        .set_index(key)["source"]
+    )
+
+
 def _top_authors(articles_df: pd.DataFrame) -> None:
     st.subheader("✍️ Autores mais prolíficos")
     if not require_columns(articles_df, ["authors"]):
@@ -382,9 +427,7 @@ def _top_authors(articles_df: pd.DataFrame) -> None:
         return
 
     top_authors = author_rows["author"].value_counts().head(15)
-    modal_source = None
-    if "source" in author_rows.columns:
-        modal_source = author_rows.groupby("author")["source"].agg(lambda s: s.mode().iat[0])
+    modal_source = _modal_source(author_rows, "author", top_authors.index)
 
     fig = topn_hbar(
         top_authors,
@@ -418,9 +461,7 @@ def _venue_impact(articles_df: pd.DataFrame) -> None:
         st.info("Nenhum periódico com artigos suficientes com contagem de citações nesta camada.")
         return
 
-    modal_source = None
-    if "source" in cited_venues.columns:
-        modal_source = cited_venues.groupby("venue")["source"].agg(lambda s: s.mode().iat[0])
+    modal_source = _modal_source(cited_venues, "venue", venue_impact.index)
 
     article_counts = venue_impact["articles"]
     fig = topn_hbar(

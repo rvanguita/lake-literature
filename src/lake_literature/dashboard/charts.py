@@ -206,8 +206,8 @@ def source_topn_hbar(
     return fig
 
 
-def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
-    """Lorenz curve: cumulative share of output vs. cumulative share of authors.
+def lorenz_chart(series: dict[str, pd.DataFrame], *, entity_label: str = "autores") -> go.Figure:
+    """Lorenz curve: cumulative share of output vs. cumulative share of `entity_label`.
 
     `series` maps a source key ("ieee"/"elsevier"/"total") to a DataFrame with
     the shape from `analytics.lorenz_curve` (columns `share_of_authors`,
@@ -217,6 +217,11 @@ def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
     3-real-series style. The perfect-equality diagonal is always a second kind
     of real trace, not a reference line -- consistent with the "Total is a
     real series" rule, generalized to this chart's own benchmark.
+
+    `entity_label` only changes the x-axis wording (default "autores", the
+    original use case in `researchers.py`) -- `lorenz_curve`'s own column
+    names stay `share_of_authors`/`share_of_output` regardless of what's
+    actually being ranked (e.g. venues instead of authors).
     """
     fig = go.Figure()
     for key, lorenz_df in series.items():
@@ -242,7 +247,7 @@ def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
         )
     )
     fig.update_layout(
-        xaxis_title="Parcela acumulada de autores",
+        xaxis_title=f"Parcela acumulada de {entity_label}",
         yaxis_title="Parcela acumulada de artigos",
         xaxis=dict(tickformat=".0%", range=[0, 1]),
         yaxis=dict(tickformat=".0%", range=[0, 1]),
