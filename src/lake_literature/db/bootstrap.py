@@ -1,5 +1,9 @@
-"""Create the four medallion databases (lit_raw/bronze/silver/gold) on the
-MySQL server if they don't exist yet, then create every layer's tables.
+"""Create the four medallion databases (`raw`/`bronze`/`silver`/`gold`) on
+the MySQL server if they don't exist yet, then create every layer's tables.
+
+Note: `raw`/`bronze`/`silver` are typically already present on the server
+(shared with unrelated tables from other projects) -- `CREATE DATABASE IF
+NOT EXISTS` is a no-op for them. `gold` is created fresh.
 
 Usage:
     uv run python -m lake_literature.db.bootstrap
@@ -43,17 +47,19 @@ def create_tables() -> None:
         module.Base.metadata.create_all(engine)
         if layer in ("bronze", "silver", "gold"):
             inspector = inspect(engine)
-            if inspector.has_table("articles"):
-                cols = {c["name"] for c in inspector.get_columns("articles")}
+            if inspector.has_table("lit_articles"):
+                cols = {c["name"] for c in inspector.get_columns("lit_articles")}
                 if "reference_count" not in cols:
                     with engine.connect() as conn:
                         conn.execute(
-                            text("ALTER TABLE `articles` ADD COLUMN `reference_count` INT NULL")
+                            text("ALTER TABLE `lit_articles` ADD COLUMN `reference_count` INT NULL")
                         )
                         conn.commit()
                 if layer == "gold" and "sources" not in cols:
                     with engine.connect() as conn:
-                        conn.execute(text("ALTER TABLE `articles` ADD COLUMN `sources` JSON NULL"))
+                        conn.execute(
+                            text("ALTER TABLE `lit_articles` ADD COLUMN `sources` JSON NULL")
+                        )
                         conn.commit()
 
 

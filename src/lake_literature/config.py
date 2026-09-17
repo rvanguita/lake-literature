@@ -2,9 +2,10 @@
 
 Reads MySQL connection details from `.env` and exposes one database name /
 connection URL per medallion layer (raw, bronze, silver, gold). Every layer
-lives in its own MySQL database, named `<MYSQL_DB_PREFIX>_<layer>` (e.g.
-`lit_raw`), so table names stay identical across layers -- only the database
-changes.
+lives in its own MySQL database, named plainly after the layer itself (e.g.
+`bronze`) -- note these databases are shared with unrelated tables from other
+projects on the same MySQL server; the pipeline only ever touches its own
+`lit_*`-prefixed tables within them.
 """
 
 from __future__ import annotations
@@ -63,7 +64,6 @@ class MySQLSettings:
     port: int
     user: str
     password: str
-    db_prefix: str
 
     @classmethod
     def from_env(cls) -> MySQLSettings:
@@ -72,13 +72,12 @@ class MySQLSettings:
             port=int(os.environ.get("MYSQL_PORT", "3306")),
             user=os.environ.get("MYSQL_USER", "root"),
             password=os.environ.get("MYSQL_PASSWORD", ""),
-            db_prefix=os.environ.get("MYSQL_DB_PREFIX", "lit"),
         )
 
     def database_name(self, layer: str) -> str:
         if layer not in LAYERS:
             raise ValueError(f"unknown layer {layer!r}, expected one of {LAYERS}")
-        return f"{self.db_prefix}_{layer}"
+        return layer
 
     def server_url(self) -> str:
         """Connection URL with no database selected (for CREATE DATABASE)."""

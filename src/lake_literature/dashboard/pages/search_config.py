@@ -8,6 +8,12 @@ import streamlit as st
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.components import hero_banner, page_header
 from lake_literature.dashboard.theme import SOURCE_COLORS, SOURCE_LABELS
+from lake_literature.ingest.raw_upload import (
+    SOURCE_UPLOAD_SPECS,
+    RawUploadError,
+    ingest_uploaded_file,
+    save_uploaded_file,
+)
 
 
 def render() -> None:
@@ -32,8 +38,14 @@ def render() -> None:
         "publishers pode retornar resultados diferentes dos capturados aqui.",
     )
 
-    for _, row in configs_df.iterrows():
-        _source_card(row)
+    sources = list(configs_df["source"])
+    tabs = st.tabs([f"{_SOURCE_EMOJI.get(s, '📰')} {SOURCE_LABELS.get(s, s)}" for s in sources])
+    for tab, (_, row) in zip(tabs, configs_df.iterrows(), strict=True):
+        with tab:
+            _source_card(row)
+
+
+_SOURCE_EMOJI = {"ieee": "🔷", "elsevier": "🟠"}
 
 
 def _source_card(row: pd.Series) -> None:
@@ -41,28 +53,54 @@ def _source_card(row: pd.Series) -> None:
     label = SOURCE_LABELS.get(source, source)
     color = SOURCE_COLORS.get(source, "#9a9a94")
 
-    with st.container(border=True):
-        st.markdown(
-            f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">● {label}</span>',
-            unsafe_allow_html=True,
+    st.markdown(
+        f'<span style="color:{color}; font-weight:700; font-size:1.1rem;">● {label}</span>',
+        unsafe_allow_html=True,
+    )
+
+    query_string = row.get("query_string") or "—"
+    st.caption("Query")
+    st.code(query_string, language=None, wrap_lines=True)
+
+    col_filters, col_years = st.columns(2)
+    with col_filters:
+        st.caption("Filtros aplicados")
+        st.write(row.get("filters") or "—")
+    with col_years:
+        st.caption("Intervalo de anos")
+        st.write(row.get("year_range") or "—")
+
+    search_url = row.get("search_url")
+    if search_url:
+        st.markdown(f"🔗 [Abrir esta busca no site original]({search_url})")
+
+    with st.expander("Texto bruto do config.csv"):
+        st.text(row.get("raw_text") or "—")
+        st.caption(f"Arquivo de origem: `{row.get('source_file') or '—'}`")
+
+    _upload_section(source)
+
+
+def _upload_section(source: str) -> None:
+    specs = SOURCE_UPLOAD_SPECS.get(source, {})
+    if not specs:
+        return
+    extensions = sorted(specs)
+
+    with st.expander("⬆️ Enviar novo arquivo para a camada raw"):
+        st.caption(
+            f"Aceita {', '.join(f'`.{ext}`' for ext in extensions)} — o arquivo é salvo em "
+            f"`data/{source}/` e processado pelo mesmo loader do pipeline (idempotente por hash)."
         )
-
-        query_string = row.get("query_string") or "—"
-        st.caption("Query")
-        st.code(query_string, language=None, wrap_lines=True)
-
-        col_filters, col_years = st.columns(2)
-        with col_filters:
-            st.caption("Filtros aplicados")
-            st.write(row.get("filters") or "—")
-        with col_years:
-            st.caption("Intervalo de anos")
-            st.write(row.get("year_range") or "—")
-
-        search_url = row.get("search_url")
-        if search_url:
-            st.markdown(f"🔗 [Abrir esta busca no site original]({search_url})")
-
-        with st.expander("Texto bruto do config.csv"):
-            st.text(row.get("raw_text") or "—")
-            st.caption(f"Arquivo de origem: `{row.get('source_file') or '—'}`")
+        uploaded = st.file_uploader(
+            "Arquivo", type=extensions, key=f"raw_upload_{source}", label_visibility="collapsed"
+        )
+        if uploaded is not None and st.button("Processar upload", key=f"raw_upload_btn_{source}"):
+            try:
+                path = save_uploaded_file(source, uploaded.name, uploaded.getvalue())
+                stats = ingest_uploaded_file(path)
+            except RawUploadError as exc:
+                st.error(str(exc))
+            else:
+                st.cache_data.clear()
+                st.success(f"Arquivo salvo em `{path}` e processado: {stats}")
