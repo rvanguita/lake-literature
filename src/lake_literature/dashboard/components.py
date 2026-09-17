@@ -314,13 +314,19 @@ def require_columns(df: pd.DataFrame, cols: list[str], message: str | None = Non
 
 
 def render_chart(fig, *, caption: str | None = None, height: int | None = None) -> None:
-    """Apply the shared dark theme, render the figure, and add its caption.
+    """Apply the shared light/dark theme, render the figure, add its caption.
 
     Replaces the `polish_figure_layout(fig); st.plotly_chart(...); st.caption(...)`
     triplet that used to be repeated in every chart function.
+
+    `theme=None` (not Streamlit's `"streamlit"` default) because the figure is
+    already fully styled by `polish_figure_layout`: Streamlit's theme would
+    override that template's background with its own, which follows the
+    browser/system setting rather than this dashboard's sidebar "Tema" toggle
+    -- so charts rendered near-black against the navy page background.
     """
     polish_figure_layout(fig, height=height)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, theme=None, width="stretch")
     if caption:
         st.caption(caption)
 
