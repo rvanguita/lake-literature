@@ -1,20 +1,27 @@
 # Product Requirements Document — lake-literature
 
-See [`../README.md`](../README.md) for a quick orientation and [`SDD.md`](SDD.md) for how this is built.
+See [`../README.md`](../README.md) for a quick orientation, [`SDD.md`](SDD.md) for how this is built and
+[`ROADMAP.md`](ROADMAP.md) for what is still worth improving.
 
 ## 1. Problem statement
 
-Writing a new article on *distribution system planning* requires knowing, out of several hundred candidate
-papers scattered across publisher databases, which ones are actually worth citing. Doing this by hand from
-raw IEEE Xplore and ScienceDirect search exports is unmanageable:
+Writing a new article on *distribution system planning* requires knowing, out of **1,831** candidate papers
+scattered across publisher databases, which ones are actually worth citing. Doing this by hand from raw IEEE
+Xplore and ScienceDirect search exports is unmanageable:
 
 - The two publishers export different formats (CSV+BibTeX vs. BibTeX-only), different field names, different
   DOI formats, and different pagination conventions — see the comparison table in `CLAUDE.md`.
-- The same paper frequently appears in both exports, and nothing catches that duplication without a reliable
-  join key.
-- Search-hit counts, downloaded-entry counts, and retrieved-PDF counts never match (IEEE alone reports ~304
-  hits vs. ~266 downloaded `.bib` entries vs. ~96 PDFs), so the corpus is inherently partial — a fact the
-  pipeline has to represent, not paper over.
+- A paper indexed by both publishers would survive deduplication twice without a reliable join key. (Measured
+  on the current corpus, that overlap is currently **zero** — 1,529 articles come from Elsevier only and 302
+  from IEEE only — so DOI dedup is insurance the design needs, not the dominant problem today. What the
+  corpus *does* contain is 18 near-identical abstracts published under distinct DOIs, which no join key can
+  catch; the `semantic` stage surfaces those separately.)
+- Counts never line up across the pipeline: 304 IEEE CSV rows and 1,815 BibTeX entries ingest to 1,836 bronze
+  records, 1,831 survive DOI deduplication, and only 96 have a PDF (5.2%). The corpus is inherently partial —
+  a fact the pipeline has to represent, not paper over.
+- The query is ambiguous: "distribution system planning" also matches logistics and supply-chain work.
+  Roughly a tenth of what the search returned is off-topic in exactly that way, so relevance screening is
+  part of the product, not a post-hoc filter.
 - There is no single place to see corpus composition, quality, and coverage at a glance, or to know which
   papers have full text available for deeper analysis.
 
@@ -28,6 +35,9 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
   since PDF filenames are a lossy encoding of the title.
 - Chunk article text (abstracts always, full text when a PDF is linked) into a form suitable for retrieval,
   and embed it locally with no external API dependency.
+- Score every article against both readings of the ambiguous query, so relevance screening — a core step of
+  a systematic literature review — is a visible, reversible decision with a defensible threshold rather than
+  a hidden filter.
 - Make corpus composition, data quality, and pipeline health visible and actionable through a dashboard,
   without requiring anyone to query MySQL directly.
 - Make every pipeline stage re-runnable on demand (via CLI or Airflow) as new export files are added, without
@@ -69,12 +79,19 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
    (or the full pipeline) after updating the corpus, and watch its status without leaving the dashboard.
 7. As the researcher, I use "Configuração da Busca" to recall exactly which query, filters, and year range
    produced the current corpus, so I can reproduce or extend the search later.
-8. (Future) As an LLM agent, I query `gold.lit_chunks` by embedding similarity to retrieve the passages most
-   relevant to a citation question and return their source DOIs.
+8. As the researcher, I use "Semântica & Relevância" to screen the corpus: the margin histogram shows how
+   much of it leans to logistics rather than to the review's topic, the map shows where those articles sit,
+   and the table lists the ones below the cut so I can review them before discarding anything.
+9. As the researcher, I use "Pesquisadores" to see who publishes most in the corpus and who co-authors with
+   whom, knowing the author-identity caveat the page discloses.
+10. As the researcher, I use "Tendências & Previsão" to see where publication volume and keyword attention
+    are heading, with the current (partial) year labelled as such.
+11. (Future) As an LLM agent, I query `gold.lit_chunks` by embedding similarity to retrieve the passages most
+    relevant to a citation question and return their source DOIs.
 
 ## 6. Functional requirements
 
-### Pipeline (CLI: `uv run lake-literature --stage <raw|bronze|silver|gold|embed|all>`)
+### Pipeline (CLI: `uv run lake-literature --stage <raw|bronze|silver|gold|embed|semantic|all>`)
 
 - `raw`: ingest `config.csv`, IEEE CSV rows, all BibTeX entries (both sources), and the PDF inventory,
   verbatim, keyed for idempotent re-ingestion (`lit_source_files` manifest, sha256-based).
@@ -87,17 +104,22 @@ raw IEEE Xplore and ScienceDirect search exports is unmanageable:
   every article, full-text chunks for PDF-linked ones).
 - `embed`: fill `gold.lit_chunks.embedding`/`gold.lit_chunks.embed_model` for chunks that don't have one yet;
   safe to re-run after every `gold` run without re-embedding existing chunks.
-- `all`: run all five stages in order, bootstrapping all four MySQL databases first.
+- `semantic`: from the abstract embeddings, write `gold.lit_semantics` (relevance against the topic anchor
+  and against the logistics anchor, discovered theme, 2D map coordinates) and `gold.lit_duplicate_pairs`
+  (near-identical abstracts under distinct DOIs). Owns and rewrites only those two tables.
+- `all`: run all six stages in order, bootstrapping all four MySQL databases first.
 
 ### Dashboard (Streamlit, `uv run streamlit run main.py` or `docker compose up dashboard`)
 
-Nine pages as listed in the README's page table, each reading from the relevant layer's MySQL database. The
+Ten pages as listed in the README's page table, each reading from the relevant layer's MySQL database. The
 "Camadas & Pipeline" and "Qualidade e RAG" pages additionally act as a control surface: they trigger Airflow
-DAG runs and poll status, rather than running pipeline code in-process.
+DAG runs and poll status, rather than running pipeline code in-process. The sidebar's relevance filter is
+global and opt-in: turning it on cuts at the screening margin's zero, and an article with no score is never
+removed by it.
 
 ### Orchestration (Airflow, `docker compose up -d`)
 
-Six DAGs (`lake_literature_raw/bronze/silver/gold/embed` + `lake_literature_all`), manual/API-triggered only
+Seven DAGs (`lake_literature_raw/bronze/silver/gold/embed/semantic` + `lake_literature_all`), manual/API-triggered only
 (no cron schedule), each task shelling out to the same CLI entrypoint used for local runs — so pipeline
 behavior is identical whether triggered locally or from Airflow.
 
@@ -113,8 +135,20 @@ behavior is identical whether triggered locally or from Airflow.
   completion, and stays there on subsequent `gold` reruns until new chunks are added.
 - **Dashboard correctness**: page-level counts (e.g. total articles, IEEE vs. Elsevier split) match direct
   queries against the corresponding MySQL database.
+- **Screening separates the two readings of the query**: the contrastive margin puts the logistics theme
+  below zero and everything else above it. Measured on the current corpus, 165 articles (9%) fall below the
+  cut and 145 of them sit in the logistics theme, with at most 12 in any other — and no theme other than
+  logistics has a negative mean margin.
+- **The map agrees with the themes**: a point's nearest neighbours on the semantic map mostly share its
+  theme colour (0.72 over the 15 nearest, up from 0.65 when clustering and projection used different
+  spaces). This is a readability signal, not a clustering-quality claim: silhouette on this corpus is flat,
+  because the themes genuinely overlap.
 
 ## 8. Out of scope for this iteration / open questions
+
+The measured improvement backlog lives in [`ROADMAP.md`](ROADMAP.md) — storage format of the embeddings,
+validating the screening threshold against hand labels, pipeline run history, and the rest. This section
+keeps only the standing scope decisions.
 
 - **Retrieval**: implemented. The "Qualidade e RAG" dashboard page runs real cosine-similarity search over
   `gold.lit_chunks.embedding` (`dashboard/search.py`) once the `embed` stage has populated it, falling back to keyword
@@ -123,7 +157,7 @@ behavior is identical whether triggered locally or from Airflow.
   real vector store if the corpus grew by an order of magnitude or more.
 - **Corpus refresh automation**: adding new export files to `data/` is still a manual step; there is no
   scheduled or triggered re-scrape. Remains an explicit non-goal, see §3.
-- **Testing**: a pytest suite exists under `tests/` covering DOI normalization, dedup/merge logic, PDF fuzzy
-  matching, chunking, and similarity ranking, run against in-memory SQLite rather than real MySQL. It does not
-  cover Airflow DAGs, the Streamlit UI, or file parsing against the real (gitignored) `data/` corpus — those
-  remain manually verified.
+- **Testing**: 105 tests under `tests/` (see SDD §8) run against in-memory SQLite rather than real MySQL,
+  covering the transforms, the semantic stage's pure functions and the dashboard's analytics/chart/theme
+  contracts. They do not cover Airflow DAGs, the Streamlit UI itself, or file parsing against the real
+  (gitignored) `data/` corpus — those remain manually verified.

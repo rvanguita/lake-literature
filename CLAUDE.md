@@ -59,8 +59,11 @@ the DAG file deliberately never imports `lake_literature`).
 - `embed` — fills `lit_chunks.embedding` locally via `fastembed` (`BAAI/bge-small-en-v1.5`, ONNX, no API key).
 - `semantic` — reads those embeddings, writes `lit_semantics` + `lit_duplicate_pairs`.
 
-**`gold` truncates and rebuilds the chunks, which drops their vectors — re-running it means re-running
-`embed` and then `semantic`.**
+**`gold` rebuilds the articles table but *reconciles* the chunks: a chunk whose text is unchanged keeps its
+row and its vector, and only the chunks whose text actually changed are invalidated. (It was a plain
+delete-and-rebuild once, which silently threw away every embedding on each run — and with them the basis of
+`lit_semantics`.) So after a `gold` run, `embed` fills exactly the chunks that changed, and `semantic` has to
+be re-run either way, because it rewrites its own tables from whatever is embedded now.**
 
 ### Idempotency, per stage
 
@@ -70,7 +73,10 @@ Each stage has its own re-run contract; preserve it when editing.
 - `bronze` — upsert keyed on `(source, source_id)`; pagination duplicates within a source collapse naturally.
   Note `_upsert` writes field by field, so a `None` literal *overwrites* — that's why `ingest/enrichment.py`
   re-applies the citation/reference-count backfill after every bronze build.
-- `silver` / `gold` — delete-and-rebuild: fully derived from the layer above.
+- `silver` — delete-and-rebuild: fully derived from the layer above.
+- `gold` — articles delete-and-rebuild; chunks reconcile against the desired set (`(chunk_type, seq)` per
+  DOI), so unchanged text keeps its embedding. The run stats say how many were unchanged / invalidated /
+  added.
 - `embed` — only processes `embedding IS NULL`; running it twice is a no-op.
 - `semantic` — truncates the two tables it owns, never touches curated article rows.
 
@@ -173,7 +179,7 @@ comparing, or the same paper indexed by both publishers will survive deduplicati
 at all are dropped at silver (counted as `skipped_no_doi`, never silently).
 
 The IEEE-only fields (`countries`, `online_date`, `document_type`, `license`) carry through bronze → silver →
-gold but cover only ~17% of the corpus. **Any analysis built on them must say it covers the IEEE subset**, not
+gold but cover only the IEEE subset — 302 of 1,831 articles, 16.5%. **Any analysis built on them must say it covers the IEEE subset**, not
 the whole corpus.
 
 ### BibTeX parsing gotcha
@@ -198,8 +204,15 @@ than exact string equality — and prefer DOI-keyed renaming if a linking step i
 
 ### Counts don't line up
 
-The IEEE CSV reports ~304 search hits but the downloaded `.bib` files total ~266 entries, and only ~96 PDFs were
-retrieved. The corpus is deliberately incomplete; do not treat a count mismatch as a bug to fix in code.
+Measured on the current corpus (2026-09-17): 304 IEEE CSV rows and 1,815 BibTeX entries across both sources
+ingest to 1,836 bronze records; 1,831 survive silver's DOI deduplication (5 dropped as `skipped_no_doi`); 96
+have a PDF. The gap between search hits, downloaded entries and retrieved PDFs is a property of how the
+corpus was hand-assembled — do not treat a count mismatch as a bug to fix in code. Re-measure before quoting
+these numbers; the corpus grows whenever a new export is added.
+
+The split is also lopsided: 1,529 articles come from Elsevier and 302 from IEEE, and **no article is
+currently indexed by both** — DOI deduplication is insurance the design needs, not the dominant problem in
+this corpus. The 18 near-identical abstracts under distinct DOIs in `lit_duplicate_pairs` are.
 
 ## Conventions
 

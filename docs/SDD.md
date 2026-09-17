@@ -1,6 +1,7 @@
 # System Design Document — lake-literature
 
-See [`../README.md`](../README.md) for a quick orientation and [`PRD.md`](PRD.md) for why this exists.
+See [`../README.md`](../README.md) for a quick orientation, [`PRD.md`](PRD.md) for why this exists and
+[`ROADMAP.md`](ROADMAP.md) for the measured improvement backlog.
 `../CLAUDE.md` remains the canonical reference for source-data quirks (BibTeX parsing gotchas, IEEE/Elsevier
 field differences, DOI format normalization) — this document cross-references it rather than repeating it.
 
@@ -23,8 +24,13 @@ data/articles/──▶│ (pipeline.py)│      │              │──▶ A
   `fastf1_results`, `personal_expenses`); the pipeline only ever creates/touches its own `lit_`-prefixed
   tables within them. SQLAlchemy 2.0 declarative models, one `Base`/module set per layer under
   `src/lake_literature/db/`.
-- **Compute**: pure Python/pandas transforms, no Spark or distributed processing — the corpus is a few
-  hundred records, so single-process batch jobs are sufficient.
+- **Compute**: pure Python/pandas transforms, no Spark or distributed processing — the corpus is 1,831
+  articles and 6,235 chunks (measured 2026-09-17), so single-process batch jobs are sufficient. The one
+  numerically heavy step is the `semantic` stage's PCA/t-SNE/KMeans over 1,831 × 384 floats, which runs
+  in seconds on a laptop CPU.
+- **Stages**: `raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py`
+  and each a 1:1 Airflow DAG. `semantic` is the screening/analysis stage: it reads the abstract
+  embeddings and writes per-article relevance, theme and map coordinates (see §2.1, §3).
 - **Orchestration**: Apache Airflow (`airflow/dags/lake_literature_dags.py`), used purely as a scheduler/UI
   layer over the same CLI the developer runs locally — DAG tasks are `BashOperator` calls to
   `uv run lake-literature --stage <stage>`, so pipeline logic has zero Airflow import dependency and behaves
@@ -76,6 +82,16 @@ scans to decide which paper to cite; `lit_chunks` is the RAG ingestion unit.
 `char_len`, `embedding` (JSON, nullable), `embed_model` (nullable) — the latter two filled by the `embed`
 stage; NULL until that stage has run at least once for a given chunk.
 
+`lit_semantics` (one row per article, written by the `semantic` stage): `doi` (unique),
+`relevance_score` (cosine to the review's topic anchor), `offtopic_score` (cosine to the logistics
+anchor — nullable, since rows written before the contrastive anchor existed don't have it), `theme_id`,
+`theme_label`, `map_x`/`map_y` (t-SNE coordinates, comparable only within one run), `embed_model`. The
+screening signal is the derived margin `relevance_score - offtopic_score`, whose zero means "closer to
+logistics than to the review's topic"; the dashboard cuts there.
+
+`lit_duplicate_pairs`: `doi_a`, `doi_b`, `similarity` — distinct DOIs whose abstracts are near-identical
+(cosine ≥ 0.95). Surfaced for review; nothing is merged automatically.
+
 ### 2.2 Provenance chain
 
 ```
@@ -89,6 +105,10 @@ silver.lit_articles  (one row per normalized DOI)
         │  (silver_id)
         ▼
 gold.lit_articles  ──▶  gold.lit_chunks  ──▶  lit_chunks.embedding (embed stage)
+                                                      │  (abstract chunks only)
+                                                      ▼
+                                          gold.lit_semantics + gold.lit_duplicate_pairs
+                                                   (semantic stage)
 ```
 
 Every layer keeps a back-reference to the layer below it, so any gold article or chunk can be traced back to
@@ -121,6 +141,15 @@ the filesystem; everything above it is a deterministic, rebuildable transform ov
 - `embeddings.py` — the `embed` stage: loads `fastembed`'s `BAAI/bge-small-en-v1.5` ONNX model, embeds every
   `gold.lit_chunks` row where `embedding IS NULL`, writes the vector back as JSON plus the model name.
   Entirely local, no external API, no GPU requirement.
+- `semantics.py` — the `semantic` stage, over the `abstract` chunks only (they exist for every article,
+  whereas full text covers 5% of it). Scores each abstract against two anchors, `ANCHOR_TEXT` (the
+  review's topic) and `OFF_ANCHOR_TEXT` (the logistics reading of the same ambiguous query), because a
+  single anchor's two score distributions overlap and no percentile cut can separate them; clusters the
+  corpus into `N_THEMES = 8` and projects it to 2D for the map, both over **one** shared
+  `reduced_space()` (explicit L2 normalization, then PCA(50)) so a point's theme colour and its position
+  on the map cannot disagree; and records near-duplicate abstract pairs. `k` is human-chosen, not
+  optimized — silhouette is flat across k=6..14 on this corpus and density clustering finds only one
+  continuum plus the logistics island.
 
 ## 4. Idempotency & re-run model
 
@@ -134,19 +163,31 @@ the filesystem; everything above it is a deterministic, rebuildable transform ov
 - **Bronze/silver/gold**: each stage's `build_*` function is a full rebuild-from-source-layer pass keyed on
   natural keys (`(source, source_id)` for bronze, `doi` for silver/gold) with `UniqueConstraint`s enforcing
   no duplicates at the database level.
+- **Gold chunks are reconciled, not rebuilt.** The articles table is rebuilt like silver, but a chunk whose
+  text is unchanged is left untouched so it keeps its vector (`transform/gold_articles.py`). This used to be
+  a plain delete-and-rebuild, which silently discarded every embedding on each `gold` run — and with them the
+  basis of `lit_semantics`. So re-running `gold` only invalidates the chunks whose text actually changed;
+  `embed` then fills exactly those, and `semantic` has to be re-run after either.
 - **Embed**: keyed on `lit_chunks.embedding IS NULL`, so re-running after a `gold` rebuild that added new chunks
-  only processes the new ones.
+  only processes the new ones. A run killed mid-way resumes cleanly, since each batch commits before the next.
+- **Semantic**: truncates and rewrites the two tables it owns (`lit_semantics`, `lit_duplicate_pairs`) and
+  never touches curated article rows. It also refuses to pretend: when fewer than 100% of the abstract chunks
+  are embedded it still runs, but logs a warning naming the coverage, because the signals it writes describe
+  only that subset.
 - **Bootstrap**: `db/bootstrap.py` creates all four databases/tables if missing, called at the start of every
-  `pipeline.run()`/`run_all()` invocation — safe to call repeatedly.
+  `pipeline.run()`/`run_all()` invocation — safe to call repeatedly. Columns added to a table that already
+  exists come from `_ADDITIVE_COLUMNS`, keyed by table name; every entry must be nullable and purely
+  additive, since this runs unattended on every pipeline start.
 
 ## 5. Orchestration
 
-`airflow/dags/lake_literature_dags.py` defines six DAGs, all `schedule=None` (manual/API trigger only, since
+`airflow/dags/lake_literature_dags.py` defines seven DAGs, all `schedule=None` (manual/API trigger only, since
 the pipeline is meant to be run on demand from the dashboard, not on a cron):
 
-- `lake_literature_raw`, `_bronze`, `_silver`, `_gold`, `_embed` — one single-task DAG per stage, each task a
-  `BashOperator` running `cd /opt/airflow/project && uv run lake-literature --stage <stage>`.
-- `lake_literature_all` — five chained tasks in stage order, for the dashboard's "run everything" action.
+- `lake_literature_raw`, `_bronze`, `_silver`, `_gold`, `_embed`, `_semantic` — one single-task DAG per stage,
+  generated from the module's `STAGES` tuple, each task a `BashOperator` running
+  `cd /opt/airflow/project && uv run lake-literature --stage <stage>`.
+- `lake_literature_all` — the six tasks chained in stage order, for the dashboard's "run everything" action.
 
 The dashboard never imports pipeline code to execute it directly; instead:
 
@@ -205,15 +246,29 @@ yet (e.g. right after `--stage gold` but before `--stage embed`), so the page ne
 in-memory SQLite sessions — one per medallion layer, mirroring the real one-database-per-layer design (see
 `tests/conftest.py`), so nothing here depends on a live MySQL server:
 
+105 tests across 12 files (measured 2026-09-17). Pipeline side:
+
 - `test_bronze_articles.py` — `normalize_doi` (URL-prefix stripping, casefolding), author/keyword splitting,
   numeric coercion.
 - `test_silver_articles.py` — `normalize_title`, `_merge_group` (dedup + primary-record selection), and an
   end-to-end `build_silver_articles` run asserting DOI dedup, no-DOI exclusion, and PDF fuzzy-linking.
 - `test_gold_articles.py` — `_chunk_text` boundary/overlap behavior, `_build_abstract_text` assembly.
-- `test_search.py` — `_rank_by_similarity` ranking, embedding-null exclusion, `top_k` truncation.
+- `test_raw_bib.py` — BibTeX parsing including the IEEE no-separator case, and manifest-driven skipping.
+- `test_semantics.py` — relevance/contrastive-margin arithmetic, near-duplicate pairing, theme discovery
+  and labelling rules, `reduced_space` normalization and component capping.
 
-Explicitly not covered: real MySQL connectivity, Airflow DAGs, the Streamlit UI, and file parsing against the
-real (gitignored) `data/` corpus — those stay manually verified per PRD §7.
+Dashboard side (pure functions only, no Streamlit runtime):
+
+- `test_analytics.py` / `test_analytics_authors.py` — aggregation and author-identity folding.
+- `test_search.py` — `_rank_by_similarity` ranking, embedding-null exclusion, `top_k` truncation.
+- `test_forecasting.py`, `test_qualis.py` — trend fitting and Qualis venue matching.
+- `test_charts.py` — the axis-naming contract of the shared figure builders.
+- `test_theme.py` — the chart chrome Streamlit would otherwise overwrite (background/font on the figure,
+  not only on the template).
+
+Explicitly not covered: real MySQL connectivity, Airflow DAGs, the Streamlit UI itself, and file parsing
+against the real (gitignored) `data/` corpus — those stay manually verified. See
+[`ROADMAP.md`](ROADMAP.md) §9 for the specific gaps worth closing first.
 
 ## 9. Cross-cutting concerns
 
@@ -231,6 +286,10 @@ real (gitignored) `data/` corpus — those stay manually verified per PRD §7.
 - **Incomplete corpus is expected**: IEEE's CSV reports more search hits than the downloaded `.bib` entries,
   and PDF count is smaller still — this is a property of how the corpus was assembled, not a pipeline bug to
   "fix" by inventing missing records.
-- **No test suite / linter / formatter configured**: correctness today is verified manually via the dashboard
-  and direct MySQL queries (see PRD §7 for the specific signals checked). If tests are wanted, add pytest via
-  `uv add --dev pytest` first — do not invent test commands that don't exist yet.
+- **Tooling**: `uv run pytest` (in-memory SQLite, no MySQL needed) and `uv run ruff check --fix && uv run
+  ruff format` are the two commands; `.claude/settings.json` hooks run them automatically on edit, and
+  `pre-commit` adds gitleaks plus a guard that keeps documentation-only commits off `main`.
+- **Ambiguity of the search term**: "distribution system planning" also matches logistics/supply-chain work,
+  which is why the `semantic` stage scores every abstract against two anchors instead of one. Screening is a
+  methodological step of the review, so nothing is auto-deleted: articles below the margin's zero are
+  surfaced for a human, and an article with no score is never filtered out.

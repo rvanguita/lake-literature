@@ -18,11 +18,15 @@ Doing this by hand from raw publisher exports is unmanageable:
 
 - The two publishers export different formats (CSV+BibTeX vs. BibTeX-only), different field names, different
   DOI formats, and different pagination conventions.
-- The same paper frequently appears in both exports, and nothing catches that duplication without a reliable
-  join key — DOI, normalized, is that key.
-- Search-hit counts, downloaded-entry counts, and retrieved-PDF counts never match (IEEE alone reports ~304
-  hits vs. ~266 downloaded `.bib` entries vs. ~96 PDFs), so the corpus is inherently partial — a fact the
-  pipeline has to represent, not paper over.
+- A paper indexed by both publishers would survive deduplication twice without a reliable join key — DOI,
+  normalized, is that key. (On the current corpus that overlap happens to be zero: 1,529 articles from
+  Elsevier, 302 from IEEE, none in both. The duplication that *does* exist is 18 near-identical abstracts
+  under distinct DOIs, which the `semantic` stage surfaces instead.)
+- Counts never line up: 304 IEEE CSV rows and 1,815 BibTeX entries ingest to 1,836 bronze records, 1,831
+  survive DOI deduplication, and 96 have a PDF. The corpus is inherently partial — a fact the pipeline has
+  to represent, not paper over.
+- The query itself is ambiguous: "distribution system planning" also matches logistics and supply-chain
+  work, so screening the corpus for relevance is part of the job, not an afterthought.
 - There was no single place to see corpus composition, quality, and coverage at a glance, or to know which
   papers have full text available for deeper analysis.
 
@@ -40,7 +44,7 @@ read-only input by the pipeline. See [`CLAUDE.md`](CLAUDE.md) for the parsing go
 ## Dashboard
 
 A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every pipeline stage,
-across nine pages:
+across ten pages:
 
 | Page | What it shows |
 |---|---|
@@ -49,6 +53,7 @@ across nine pages:
 | Topics & Venues | periódico ranking, CAPES/Qualis classification, keyword statistics with an interactive filter/explorer, keyword-share evolution |
 | Highlights & Impact | reference-count distribution, citation impact, collaboration, author/venue rankings |
 | Researchers | canonicalized author ranking, production over time, co-authorship network, per-topic research-line leaders, concentration/Gini analysis |
+| Semantics & Relevance | relevance screening against both readings of the query, the semantic map of the corpus, automatically discovered themes, near-duplicate abstracts |
 | Trends & Forecast | regression-based forecasts of publication volume (per source) and of keyword-level growth |
 | Layers & Pipeline | funnel + per-layer record counts and drift checks, with buttons to trigger a pipeline stage |
 | Quality & RAG | metadata richness, full-text coverage, chunk/embedding readiness, with a button to run the `embed` stage directly |
@@ -59,8 +64,8 @@ one screen instead of an endless scroll. Page labels in the running app are in P
 uses their English meaning.
 
 Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
-(`lake_literature_raw/bronze/silver/gold/embed`, defined in `airflow/dags/lake_literature_dags.py`) plus a
-combined `lake_literature_all` DAG that chains all five. The "Camadas & Pipeline" and "Qualidade e RAG"
+(`lake_literature_raw/bronze/silver/gold/embed/semantic`, defined in `airflow/dags/lake_literature_dags.py`)
+plus a combined `lake_literature_all` DAG that chains all six. The "Camadas & Pipeline" and "Qualidade e RAG"
 dashboard pages trigger and poll these DAG runs through Airflow's REST API
 (`dashboard/airflow_client.py`, `dashboard/pipeline_control.py`) instead of running the pipeline in-process,
 so every run gets proper history, logs, and per-task status in the Airflow UI.
@@ -85,8 +90,9 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.13) and access to a MySQL se
 uv sync                                     # create/refresh .venv from uv.lock
 cp .env.example .env                        # fill in MYSQL_HOST/PORT/USER/PASSWORD
 
-uv run lake-literature --stage all         # run the full pipeline (raw -> bronze -> silver -> gold -> embed)
-uv run lake-literature --stage embed       # or run just the embedding stage on its own
+uv run lake-literature --stage all         # full pipeline (raw -> bronze -> silver -> gold -> embed -> semantic)
+uv run lake-literature --stage embed       # or run just one stage on its own
+uv run lake-literature --stage semantic    # relevance screening, themes and the semantic map
 uv run streamlit run main.py                # dashboard at http://localhost:8501
 ```
 
@@ -144,17 +150,18 @@ src/lake_literature/
   db/                    SQLAlchemy models and engines, one module set per medallion layer
                           (raw_models, bronze_models, silver_models, gold_models, engines, bootstrap)
   ingest/                raw-layer loaders (raw_csv, raw_bib, raw_pdfs, raw_config, enrichment, hashing)
-  transform/             bronze/silver/gold builders + embeddings.py (the `embed` stage)
+  transform/             bronze/silver/gold builders + embeddings.py (`embed`) + semantics.py (`semantic`)
   pipeline.py            CLI entrypoint (`lake-literature --stage ...`)
   dashboard/
     app.py                Streamlit entry point, page registry, navigation
     pages/                one module per page (overview, production, topics, highlights,
-                           researchers, forecasting, pipeline_layers, quality, search_config)
+                           researchers, semantics, forecasting, pipeline_layers, quality,
+                           search_config)
     airflow_client.py      thin REST client for triggering/polling Airflow DAG runs
     pipeline_control.py    dashboard-side glue between pages and airflow_client
     analytics.py, charts.py, data.py, loaders.py, forecasting.py, theme.py, components.py
 airflow/dags/            DAG definitions (thin wrappers around `uv run lake-literature --stage X`)
-docs/                     PRD.md, SDD.md, images/architecture.svg
+docs/                     PRD.md, SDD.md, ROADMAP.md, images/architecture.svg
 scripts/git-hooks/        local pre-commit hook scripts
 tests/                    pytest suite (in-memory SQLite, no MySQL needed)
 main.py                  root Streamlit entry point (`import lake_literature.dashboard.app`)
@@ -172,6 +179,12 @@ main.py                  root Streamlit entry point (`import lake_literature.das
   (`dashboard/search.py`, scikit-learn) — not a persisted vector index. Acceptable at the corpus's current
   size (a few thousand chunks); a real vector store (pgvector, FAISS) would be the next step at an order of
   magnitude more data. Falls back to keyword matching before the `embed` stage has run.
+- **Relevance screening**: every article is scored against the review's topic *and* against the logistics
+  reading of the same ambiguous query; the margin between them is the screening signal, and its zero is the
+  cut. On the current corpus 165 of 1,831 articles (9%) fall below it, 145 of them inside the logistics
+  theme. Nothing is deleted automatically — the sidebar filter is opt-in and never removes an unscored
+  article.
 - **Corpus refresh remains manual**: adding new export files to `data/` and re-running the pipeline is a
   deliberate, unautomated step — there is no scheduled or triggered re-scrape (see PRD §3 for the full list
   of non-goals).
+- **What's next**: the measured improvement backlog lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
