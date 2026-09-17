@@ -17,14 +17,22 @@ from lake_literature.dashboard.analytics import (
     author_productivity_trend,
     author_year_matrix,
     canonical_author,
-    explode_authors,
+    cumulative_researchers,
+    explode_authors_with_position,
     explode_keywords,
     gini_coefficient,
     lorenz_curve,
     output_impact_correlation,
+    researchers_by_year,
     valid_years,
 )
-from lake_literature.dashboard.charts import lorenz_chart, topn_hbar
+from lake_literature.dashboard.charts import (
+    lorenz_chart,
+    source_bars,
+    source_lines,
+    source_topn_hbar,
+    topn_hbar,
+)
 from lake_literature.dashboard.components import (
     article_table,
     hero_banner,
@@ -43,8 +51,8 @@ TOP_NETWORK_AUTHORS = 18
     ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
 )
 def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
-    """Explode authors, canonicalize identity, and keep one display name per key."""
-    exploded = explode_authors(articles_df)
+    """Explode authors (with byline position), canonicalize identity, keep one display name per key."""
+    exploded = explode_authors_with_position(articles_df)
     if exploded.empty:
         return exploded
     exploded["author_key"] = exploded["author"].apply(canonical_author)
@@ -112,8 +120,18 @@ def render() -> None:
 
     with tab_ranking:
         _top_authors(author_rows)
+        st.divider()
+        _lead_authors_ranking(author_rows)
 
     with tab_production:
+        _researchers_by_year(articles_df)
+        st.divider()
+        _cumulative_researchers_chart(articles_df)
+        st.divider()
+        _lead_authors_by_year(articles_df)
+        st.divider()
+        _cumulative_lead_authors_chart(articles_df)
+        st.divider()
         _production_heatmap(author_rows)
         st.divider()
         _emerging_vs_established(author_rows)
@@ -138,20 +156,156 @@ def render() -> None:
 
 def _top_authors(author_rows: pd.DataFrame) -> None:
     st.subheader("✍️ Autores mais prolíficos (canonicalizado)")
-    counts = (
-        author_rows.groupby("author_display")["doi"].nunique()
-        if "doi" in author_rows.columns
-        else author_rows.groupby("author_display").size()
-    )
-    top = counts.sort_values(ascending=False).head(15)
-    modal_source = (
-        author_rows.groupby("author_display")["source"].agg(lambda s: s.mode().iat[0])
-        if "source" in author_rows.columns
-        else None
-    )
-    fig = topn_hbar(top, color_by=modal_source, x_title="Artigos")
-    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    count_col = "doi" if "doi" in author_rows.columns else "author_display"
+    agg = "nunique" if count_col == "doi" else "size"
+    counts = author_rows.groupby("author_display")[count_col].agg(agg)
+    top_index = counts.sort_values(ascending=False).head(15).index
+
+    if "source" in author_rows.columns:
+        scoped = author_rows[author_rows["author_display"].isin(top_index)]
+        by_source = (
+            scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in by_source.columns:
+                by_source[src] = 0
+        by_source["total"] = counts.reindex(top_index)
+        by_source = by_source.reindex(top_index).reset_index()
+        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    else:
+        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     render_chart(fig)
+
+
+def _lead_authors_ranking(author_rows: pd.DataFrame) -> None:
+    st.subheader("🥇 Mais frequentes como 1º ou 2º autor")
+    if "position" not in author_rows.columns:
+        st.info("Posição do autor na publicação não disponível nesta camada.")
+        return
+
+    lead_rows = author_rows[author_rows["position"] <= 1]
+    if lead_rows.empty:
+        st.info("Nenhum autor em 1ª/2ª posição identificado nesta camada.")
+        return
+
+    count_col = "doi" if "doi" in lead_rows.columns else "author_display"
+    agg = "nunique" if count_col == "doi" else "size"
+    counts = lead_rows.groupby("author_display")[count_col].agg(agg)
+    top_index = counts.sort_values(ascending=False).head(15).index
+
+    if "source" in lead_rows.columns:
+        scoped = lead_rows[lead_rows["author_display"].isin(top_index)]
+        by_source = (
+            scoped.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in by_source.columns:
+                by_source[src] = 0
+        by_source["total"] = counts.reindex(top_index)
+        by_source = by_source.reindex(top_index).reset_index()
+        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos como 1º/2º autor")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    else:
+        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos como 1º/2º autor")
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+    render_chart(
+        fig,
+        caption="Contagem combinada de artigos em que o autor aparece na 1ª OU 2ª posição da lista de "
+        "autores, na ordem registrada pela fonte (não é alfabética). Posição na publicação é apenas "
+        "isso -- uma posição; não indica um papel de autoria específico (a convenção sobre o que 1ª/2ª "
+        "posição significa varia por área, e este corpus não registra papéis). Vale o mesmo aviso de "
+        "canonicalização do topo da página.",
+    )
+
+
+def _researchers_by_year(articles_df: pd.DataFrame) -> None:
+    st.subheader("👥 Pesquisadores ativos por ano")
+    by_year = researchers_by_year(articles_df)
+    if by_year.empty:
+        st.info("Sem anos válidos para este gráfico.")
+        return
+
+    fig = source_bars(by_year, "year", total_line=True)
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Pesquisadores distintos",
+    )
+    render_chart(
+        fig,
+        caption="Autores canonicalizados distintos que publicaram em cada ano, por base. Um autor "
+        "publicando nas duas bases no mesmo ano conta uma vez em cada base, mas apenas uma vez no "
+        "Total — por isso o Total pode ser menor que a soma de IEEE + Elsevier.",
+    )
+
+
+def _cumulative_researchers_chart(articles_df: pd.DataFrame) -> None:
+    st.subheader("📈 Pesquisadores acumulados")
+    cum = cumulative_researchers(articles_df)
+    if cum.empty:
+        st.info("Sem anos válidos para o acumulado.")
+        return
+
+    fig = source_lines(
+        cum,
+        "year",
+        title="Pesquisadores distintos acumulados por ano",
+        y_title="Pesquisadores acumulados",
+    )
+    fig.update_layout(xaxis_title="Ano de publicação")
+    render_chart(
+        fig,
+        caption=f"Cada pesquisador é contado uma única vez, no ano da sua primeira publicação "
+        f"identificada no corpus (por base, e no geral para o Total). Ao final do período, o corpus "
+        f"acumula {int(cum['total'].iloc[-1]):,} pesquisadores distintos "
+        f"({int(cum['ieee'].iloc[-1]):,} IEEE, {int(cum['elsevier'].iloc[-1]):,} Elsevier).",
+    )
+
+
+def _lead_authors_by_year(articles_df: pd.DataFrame) -> None:
+    st.subheader("🥇 1º/2º autores ativos por ano")
+    by_year = researchers_by_year(articles_df, max_position=1)
+    if by_year.empty:
+        st.info("Sem anos válidos para este gráfico.")
+        return
+
+    fig = source_bars(by_year, "year", total_line=True)
+    fig.update_layout(
+        hovermode="x unified",
+        xaxis_title="Ano de publicação",
+        yaxis_title="Pesquisadores distintos (1º/2º autor)",
+    )
+    render_chart(
+        fig,
+        caption="Autores canonicalizados distintos que apareceram como 1º ou 2º autor em cada ano, "
+        'por base -- não é o mesmo universo do gráfico "Pesquisadores ativos por ano" acima, que '
+        "conta qualquer posição na lista de autores.",
+    )
+
+
+def _cumulative_lead_authors_chart(articles_df: pd.DataFrame) -> None:
+    st.subheader("📈 1º/2º autores acumulados")
+    cum = cumulative_researchers(articles_df, max_position=1)
+    if cum.empty:
+        st.info("Sem anos válidos para o acumulado.")
+        return
+
+    fig = source_lines(
+        cum,
+        "year",
+        title="1º/2º autores distintos acumulados por ano",
+        y_title="Pesquisadores acumulados",
+    )
+    fig.update_layout(xaxis_title="Ano de publicação")
+    render_chart(
+        fig,
+        caption=f"Cada pesquisador é contado uma única vez, no ano da sua primeira aparição como 1º "
+        f"ou 2º autor. Ao final do período, o corpus acumula {int(cum['total'].iloc[-1]):,} "
+        f"pesquisadores distintos nessa condição ({int(cum['ieee'].iloc[-1]):,} IEEE, "
+        f"{int(cum['elsevier'].iloc[-1]):,} Elsevier).",
+    )
 
 
 def _production_heatmap(author_rows: pd.DataFrame) -> None:
@@ -237,6 +391,26 @@ def _emerging_vs_established(author_rows: pd.DataFrame) -> None:
     )
 
 
+def _correlation_by_source(author_rows: pd.DataFrame) -> pd.DataFrame:
+    """Pearson/Spearman/N for IEEE, Elsevier, and Total, as one small table."""
+    sources: list[tuple[str, str | None]] = [("Total", None)]
+    if "source" in author_rows.columns:
+        sources = [("IEEE", "ieee"), ("Elsevier", "elsevier"), *sources]
+    rows = []
+    for label, key in sources:
+        subset = author_rows[author_rows["source"] == key] if key else author_rows
+        stats = output_impact_correlation(subset, "citation_count")
+        rows.append(
+            {
+                "Base": label,
+                "Pearson": f"{stats['pearson']:.2f}" if stats["pearson"] is not None else "—",
+                "Spearman": f"{stats['spearman']:.2f}" if stats["spearman"] is not None else "—",
+                "Autores": stats["n"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
     st.subheader("📊 Volume × impacto")
     if "citation_count" not in author_rows.columns:
@@ -253,13 +427,7 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
         st.info("Sem dados de citação suficientes para autores com ≥2 artigos.")
         return
 
-    metric_row(
-        [
-            ("Correlação de Pearson", f"{stats['pearson']:.2f}", None),
-            ("Correlação de Spearman", f"{stats['spearman']:.2f}", None),
-            ("Autores considerados", f"{stats['n']:,}", None),
-        ]
-    )
+    st.dataframe(_correlation_by_source(author_rows), hide_index=True, width="stretch")
     fig = px.scatter(
         by_author.reset_index(),
         x="articles",
@@ -290,9 +458,9 @@ def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
 
     st.caption(
         "Uma linha por autor canonicalizado (ver aviso no topo da página), uma coluna por ano de "
-        "publicação válido, mais o total histórico. Contagem por DOI distinto quando disponível, "
-        "para não contar duas vezes um artigo em coautoria assinado pelo mesmo autor. "
-        "**Ordenado do maior para o menor total.**"
+        "publicação válido, mais `total`, `ieee_total` e `elsevier_total` (quebra do total histórico "
+        "por base). Contagem por DOI distinto quando disponível, para não contar duas vezes um artigo "
+        "em coautoria assinado pelo mesmo autor. **Ordenado do maior para o menor total.**"
     )
     st.dataframe(matrix, hide_index=True, width="stretch")
     st.download_button(
@@ -305,32 +473,44 @@ def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     return matrix
 
 
+def _gini_interpretation(gini: float) -> str:
+    if gini < 0.3:
+        return "baixa concentração — a produção é relativamente distribuída entre os autores"
+    if gini > 0.6:
+        return "alta concentração — a produção está dominada por poucos autores muito prolíficos"
+    return "concentração moderada"
+
+
 def _concentration_analysis(matrix: pd.DataFrame) -> None:
     st.subheader("📐 Concentração da produção (Gini / curva de Lorenz)")
     if matrix.empty:
         st.info("Sem dados suficientes para esta análise.")
         return
 
-    gini = gini_coefficient(matrix["total"])
-    if gini < 0.3:
-        interpretation = (
-            "baixa concentração — a produção é relativamente distribuída entre os autores"
-        )
-    elif gini > 0.6:
-        interpretation = (
-            "alta concentração — a produção está dominada por poucos autores muito prolíficos"
-        )
-    else:
-        interpretation = "concentração moderada"
-    metric_row([("📐 Índice de Gini", f"{gini:.2f}", interpretation)])
+    gini_ieee = gini_coefficient(matrix["ieee_total"])
+    gini_elsevier = gini_coefficient(matrix["elsevier_total"])
+    gini_total = gini_coefficient(matrix["total"])
+    metric_row(
+        [
+            ("📐 Gini — IEEE", f"{gini_ieee:.2f}", _gini_interpretation(gini_ieee)),
+            ("📐 Gini — Elsevier", f"{gini_elsevier:.2f}", _gini_interpretation(gini_elsevier)),
+            ("📐 Gini — Total", f"{gini_total:.2f}", _gini_interpretation(gini_total)),
+        ]
+    )
 
-    lorenz_df = lorenz_curve(matrix["total"])
-    fig = lorenz_chart(lorenz_df)
+    fig = lorenz_chart(
+        {
+            "ieee": lorenz_curve(matrix["ieee_total"]),
+            "elsevier": lorenz_curve(matrix["elsevier_total"]),
+            "total": lorenz_curve(matrix["total"]),
+        }
+    )
     render_chart(
         fig,
-        caption="Índice de Gini calculado sobre o total histórico por autor (0 = todos publicam o "
-        "mesmo tanto, 1 = um único autor concentra toda a produção). Quanto mais a curva observada se "
-        "afasta da diagonal de equidade perfeita, mais concentrada é a produção do corpus.",
+        caption="Índice de Gini calculado sobre o total histórico por autor, separado por base (0 = "
+        "todos publicam o mesmo tanto, 1 = um único autor concentra toda a produção). Quanto mais uma "
+        "curva observada se afasta da diagonal de equidade perfeita, mais concentrada é a produção "
+        "naquela base.",
     )
 
 
@@ -547,6 +727,42 @@ def _research_line_leaders(author_rows: pd.DataFrame, articles_df: pd.DataFrame)
             )
             fig.update_traces(line_color=CATEGORICAL_PALETTE[2])
             render_chart(fig)
+
+    st.divider()
+    keyword_articles = articles_df[articles_df["doi"].isin(dois_with_kw)]
+    kw_by_year = researchers_by_year(keyword_articles)
+    kw_cum = cumulative_researchers(keyword_articles)
+    col_kw_year, col_kw_cum = st.columns(2)
+    with col_kw_year:
+        if kw_by_year.empty:
+            st.info("Sem anos válidos para este gráfico.")
+        else:
+            fig = source_bars(kw_by_year, "year", total_line=True)
+            fig.update_layout(
+                hovermode="x unified",
+                xaxis_title="Ano de publicação",
+                yaxis_title="Pesquisadores distintos",
+            )
+            render_chart(
+                fig,
+                caption=f"Pesquisadores distintos que publicaram em '{selected}' a cada ano, por base.",
+            )
+    with col_kw_cum:
+        if kw_cum.empty:
+            st.info("Sem anos válidos para o acumulado.")
+        else:
+            fig = source_lines(
+                kw_cum,
+                "year",
+                title=f"Pesquisadores acumulados em '{selected}'",
+                y_title="Pesquisadores acumulados",
+            )
+            fig.update_layout(xaxis_title="Ano de publicação")
+            render_chart(
+                fig,
+                caption="Total acumulado de pesquisadores distintos que já publicaram em "
+                f"'{selected}' até cada ano ({int(kw_cum['total'].iloc[-1]):,} ao final do período).",
+            )
 
     top_dois = scoped_authors["doi"].unique()
     subset = articles_df[articles_df["doi"].isin(top_dois)]

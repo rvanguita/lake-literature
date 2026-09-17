@@ -77,38 +77,45 @@ def cumulative_by_source(df: pd.DataFrame) -> pd.DataFrame:
     return counts.reset_index(drop=True)
 
 
-def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total") -> pd.DataFrame:
-    """Cumulative publications per year for the top venues (+ an Outros bucket).
+def cumulative_by_category(
+    df: pd.DataFrame, category_col: str, top_n: int = 10, scope: str = "total"
+) -> pd.DataFrame:
+    """Cumulative publications per year for the top values of `category_col` (+ an Outros bucket).
 
     `scope` restricts the underlying rows to "ieee", "elsevier", or "total"
-    (all rows) before ranking venues and accumulating -- lets one chart answer
-    "top venues overall" vs. "top venues within IEEE" without recomputing.
+    (all rows) before ranking categories and accumulating -- lets one chart
+    answer "top X overall" vs. "top X within IEEE" without recomputing.
     """
     working = df.copy()
     if scope in ("ieee", "elsevier") and "source" in working.columns:
         working = working[working["source"] == scope]
     working["year"] = valid_years(working)
-    working = working.dropna(subset=["year", "venue"])
+    working = working.dropna(subset=["year", category_col])
     if working.empty:
-        return pd.DataFrame(columns=["year", "venue", "cumulative"])
+        return pd.DataFrame(columns=["year", category_col, "cumulative"])
     working["year"] = working["year"].astype(int)
 
-    top_venues = working["venue"].value_counts().head(top_n).index.tolist()
-    working["venue_bucket"] = working["venue"].where(
-        working["venue"].isin(top_venues), OTHERS_LABEL
+    top_values = working[category_col].value_counts().head(top_n).index.tolist()
+    working["_bucket"] = working[category_col].where(
+        working[category_col].isin(top_values), OTHERS_LABEL
     )
 
-    by_year_venue = working.groupby(["year", "venue_bucket"]).size().rename("count").reset_index()
-    years = sorted(by_year_venue["year"].unique())
-    venues = list(by_year_venue["venue_bucket"].unique())
-    full_index = pd.MultiIndex.from_product([years, venues], names=["year", "venue_bucket"])
+    by_year_bucket = working.groupby(["year", "_bucket"]).size().rename("count").reset_index()
+    years = sorted(by_year_bucket["year"].unique())
+    buckets = list(by_year_bucket["_bucket"].unique())
+    full_index = pd.MultiIndex.from_product([years, buckets], names=["year", "_bucket"])
     filled = (
-        by_year_venue.set_index(["year", "venue_bucket"])["count"]
+        by_year_bucket.set_index(["year", "_bucket"])["count"]
         .reindex(full_index, fill_value=0)
         .reset_index()
     )
-    filled["cumulative"] = filled.groupby("venue_bucket")["count"].cumsum()
-    return filled.rename(columns={"venue_bucket": "venue"})
+    filled["cumulative"] = filled.groupby("_bucket")["count"].cumsum()
+    return filled.rename(columns={"_bucket": category_col})
+
+
+def cumulative_by_venue(df: pd.DataFrame, top_n: int = 10, scope: str = "total") -> pd.DataFrame:
+    """Cumulative publications per year for the top venues (+ an Outros bucket)."""
+    return cumulative_by_category(df, "venue", top_n=top_n, scope=scope)
 
 
 def source_means(df: pd.DataFrame, col: str) -> dict[str, float | None]:
@@ -147,15 +154,43 @@ def author_count_series(df: pd.DataFrame) -> pd.Series:
     )
 
 
-def explode_authors(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per (article, author), keeping year/source/citation_count/venue."""
+def explode_authors_with_position(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (article, author), plus the author's 0-based byline position.
+
+    Position 0 is the first-listed author, 1 the second, etc. -- the order the
+    source `.bib`/CSV author field was written in (not alphabetical; see
+    `transform.bronze_articles._split_bibtex_authors`/`_split_ieee_csv_authors`).
+    It's a positional count only, not a claim about authorship role -- what a
+    given position conventionally means varies by field, and this corpus
+    doesn't record roles.
+    """
+    columns = ["author", "position", "year", "source", "venue", "doi"]
     if df.empty or "authors" not in df.columns:
-        return pd.DataFrame(columns=["author", "year", "source", "venue", "doi"])
+        return pd.DataFrame(columns=columns)
     keep = [c for c in ("year", "source", "venue", "doi", "citation_count") if c in df.columns]
     working = df[["authors", *keep]].copy()
-    working = working.explode("authors").rename(columns={"authors": "author"})
+    working["authors"] = working["authors"].apply(
+        lambda lst: list(enumerate(lst)) if isinstance(lst, list) else np.nan
+    )
+    working = working.explode("authors")
+    working = working[working["authors"].apply(lambda v: isinstance(v, tuple))]
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    # `.explode()` repeats the original row index for every exploded entry, so a
+    # positional (not index-aligned) assignment is required here -- joining two
+    # frames that both carry duplicate index labels would cross-join within each
+    # duplicated label instead of pairing rows one-to-one.
+    tuples = working["authors"].tolist()
+    working = working.drop(columns=["authors"])
+    working["position"] = [t[0] for t in tuples]
+    working["author"] = [t[1] for t in tuples]
     working = working[working["author"].notna() & (working["author"].astype(str).str.strip() != "")]
     return working.reset_index(drop=True)
+
+
+def explode_authors(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (article, author), keeping year/source/citation_count/venue."""
+    return explode_authors_with_position(df).drop(columns=["position"])
 
 
 def explode_keywords(df: pd.DataFrame) -> pd.DataFrame:
@@ -224,8 +259,11 @@ def author_display_name(names: pd.Series) -> str:
     return max(names.unique(), key=len)
 
 
+_MATRIX_SUMMARY_COLS = ("total", "ieee_total", "elsevier_total")
+
+
 def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per canonical author, one column per valid year, plus `total`.
+    """One row per canonical author, one column per valid year, plus source totals.
 
     Explodes `authors`, folds names via `canonical_author` (see its docstring
     for the "initial surname" identity-merge caveat -- any page showing this
@@ -235,17 +273,22 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     a co-authored paper). Sorted descending by `total` per the page's "highest
     to lowest" requirement. Years outside `valid_years`' plausible window are
     dropped before pivoting, same as every other year-based aggregation here.
+
+    `ieee_total`/`elsevier_total` break `total` down by source (0 when a
+    `source` column isn't present), using the same distinct-DOI counting rule
+    as the year columns -- the "3 real series" convention this dashboard uses
+    everywhere else (see `source_counts_by`).
     """
     exploded = explode_authors(df)
     if exploded.empty:
-        return pd.DataFrame(columns=["author", "total"])
+        return pd.DataFrame(columns=["author", *_MATRIX_SUMMARY_COLS])
 
     exploded["author_key"] = exploded["author"].apply(canonical_author)
     exploded = exploded[exploded["author_key"] != ""]
     exploded["year"] = valid_years(exploded)
     exploded = exploded.dropna(subset=["year"]).astype({"year": int})
     if exploded.empty:
-        return pd.DataFrame(columns=["author", "total"])
+        return pd.DataFrame(columns=["author", *_MATRIX_SUMMARY_COLS])
 
     display_names = exploded.groupby("author_key")["author"].apply(author_display_name)
     exploded["author_display"] = exploded["author_key"].map(display_names)
@@ -260,10 +303,109 @@ def author_year_matrix(df: pd.DataFrame) -> pd.DataFrame:
     )
     pivot.columns = [str(int(c)) for c in pivot.columns]
     pivot["total"] = pivot.sum(axis=1)
+
+    if "source" in exploded.columns:
+        src_pivot = (
+            exploded.groupby(["author_display", "source"])[count_col].agg(agg).unstack(fill_value=0)
+        )
+        for src in ("ieee", "elsevier"):
+            if src not in src_pivot.columns:
+                src_pivot[src] = 0
+        pivot["ieee_total"] = src_pivot["ieee"].reindex(pivot.index, fill_value=0).astype(int)
+        pivot["elsevier_total"] = (
+            src_pivot["elsevier"].reindex(pivot.index, fill_value=0).astype(int)
+        )
+    else:
+        pivot["ieee_total"] = 0
+        pivot["elsevier_total"] = 0
+
     pivot = pivot.sort_values("total", ascending=False)
     pivot.index.name = "author"
-    year_cols = sorted((c for c in pivot.columns if c != "total"), key=int)
-    return pivot.reset_index()[["author", "total", *year_cols]]
+    year_cols = sorted((c for c in pivot.columns if c not in _MATRIX_SUMMARY_COLS), key=int)
+    return pivot.reset_index()[["author", *_MATRIX_SUMMARY_COLS, *year_cols]]
+
+
+def _exploded_author_years(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
+    """Shared prep for author-by-year aggregations: explode, canonicalize, valid years only.
+
+    `max_position`, when given, restricts to authors at or before that 0-based
+    byline position (e.g. `max_position=1` keeps only the 1st/2nd author of
+    each article) -- see `explode_authors_with_position`.
+    """
+    exploded = (
+        explode_authors_with_position(df) if max_position is not None else explode_authors(df)
+    )
+    if max_position is not None and not exploded.empty:
+        exploded = exploded[exploded["position"] <= max_position]
+    if exploded.empty:
+        return exploded
+    exploded["author_key"] = exploded["author"].apply(canonical_author)
+    exploded = exploded[exploded["author_key"] != ""]
+    exploded["year"] = valid_years(exploded)
+    return exploded.dropna(subset=["year"]).astype({"year": int})
+
+
+def researchers_by_year(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
+    """Distinct canonical-author count per year, split ieee/elsevier/total.
+
+    Unlike `source_counts_by` (which counts rows), `total` here is counted
+    independently as the number of distinct authors active that year
+    regardless of source -- an author publishing in both IEEE and Elsevier
+    the same year must count once in `total`, not twice. `ieee`/`elsevier`
+    default to 0 when a `source` column isn't present. `max_position` restricts
+    to authors at or before that byline position (see `_exploded_author_years`).
+    """
+    exploded = _exploded_author_years(df, max_position=max_position)
+    if exploded.empty:
+        return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
+
+    years = sorted(exploded["year"].unique())
+    result = pd.DataFrame({"year": years})
+    has_source = "source" in exploded.columns
+    for src in ("ieee", "elsevier"):
+        if has_source:
+            counts = exploded[exploded["source"] == src].groupby("year")["author_key"].nunique()
+            result[src] = result["year"].map(counts).fillna(0).astype(int)
+        else:
+            result[src] = 0
+    total_counts = exploded.groupby("year")["author_key"].nunique()
+    result["total"] = result["year"].map(total_counts).fillna(0).astype(int)
+    return result
+
+
+def cumulative_researchers(df: pd.DataFrame, max_position: int | None = None) -> pd.DataFrame:
+    """Cumulative count of distinct researchers introduced by each year.
+
+    Each canonical author is counted once, in the year of their earliest
+    valid-year appearance (within that source, for `ieee`/`elsevier`; across
+    all sources, for `total`) -- summing each year's *active* researcher
+    count would double-count an author active across multiple years, which
+    isn't what a cumulative researcher count should mean. As with every other
+    ieee/elsevier/total triple here, `total` isn't required to equal
+    `ieee + elsevier` -- an author's first IEEE year and first Elsevier year
+    can differ from their first-ever appearance. `max_position` restricts to
+    authors at or before that byline position (see `_exploded_author_years`).
+    """
+    exploded = _exploded_author_years(df, max_position=max_position)
+    if exploded.empty:
+        return pd.DataFrame(columns=["year", "ieee", "elsevier", "total"])
+
+    years = sorted(exploded["year"].unique())
+
+    def cumulative_new(sub: pd.DataFrame) -> pd.Series:
+        if sub.empty:
+            return pd.Series(0, index=years, dtype="int64")
+        first_year = sub.groupby("author_key")["year"].min()
+        by_year = first_year.value_counts().reindex(years, fill_value=0)
+        return by_year.cumsum()
+
+    result = pd.DataFrame({"year": years})
+    has_source = "source" in exploded.columns
+    for src in ("ieee", "elsevier"):
+        sub = exploded[exploded["source"] == src] if has_source else exploded.iloc[0:0]
+        result[src] = cumulative_new(sub).to_numpy()
+    result["total"] = cumulative_new(exploded).to_numpy()
+    return result
 
 
 def gini_coefficient(values: pd.Series) -> float:
@@ -331,7 +473,7 @@ def author_productivity_trend(matrix: pd.DataFrame, top_n: int) -> pd.DataFrame:
     if matrix.empty:
         return pd.DataFrame(columns=columns)
 
-    year_cols = [c for c in matrix.columns if c not in ("author", "total")]
+    year_cols = [c for c in matrix.columns if c not in ("author", *_MATRIX_SUMMARY_COLS)]
     top = matrix.sort_values("total", ascending=False).head(top_n)
 
     rows = []

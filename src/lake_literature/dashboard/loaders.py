@@ -14,6 +14,7 @@ import json
 import pandas as pd
 import streamlit as st
 
+from lake_literature.dashboard import qualis
 from lake_literature.dashboard.data import (
     bronze_doi_dropped_counts,
     layer_row_counts,
@@ -231,3 +232,14 @@ def require_articles() -> pd.DataFrame:
         )
         st.stop()
     return df
+
+
+@st.cache_data(ttl=None)
+def venue_qualis_map(venues: tuple[str, ...]) -> pd.DataFrame:
+    """CAPES/Qualis (ENGENHARIAS IV) classification for each of `venues`.
+
+    Cached indefinitely (the reference file doesn't change during a session) --
+    see `dashboard.qualis` for the fuzzy-matching rationale.
+    """
+    qualis_df = qualis.load_qualis_reference()
+    return qualis.match_venues_to_qualis(list(venues), qualis_df)
