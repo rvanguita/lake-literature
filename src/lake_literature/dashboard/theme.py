@@ -423,8 +423,8 @@ def _figure_template(theme_type: str, has_title: bool):
     each in Plotly's per-property validation -- with ~20 charts per page that
     was the single largest cost in rendering a page. A template is validated
     once here and afterwards applied by reference (~0.8ms). It layers on top
-    of Plotly's default template so the built-in colorway/colorscales the
-    Express charts rely on survive.
+    of Plotly's own `plotly` template so the built-in colorscales the Express
+    charts rely on survive.
 
     The legend offset depends on whether the figure has a title, which is why
     that's part of the cache key rather than applied per figure.
@@ -452,6 +452,10 @@ def _figure_template(theme_type: str, has_title: bool):
         ),
         paper_bgcolor=t["chart_bg"],
         plot_bgcolor=t["chart_bg"],
+        # The fallback for any chart that doesn't pass its own colors, so those
+        # match the palette the rest of the dashboard uses instead of Plotly's
+        # stock one.
+        colorway=CATEGORICAL_PALETTE,
         xaxis=axis,
         yaxis=axis,
         legend=dict(
@@ -468,7 +472,12 @@ def _figure_template(theme_type: str, has_title: bool):
     )
     if has_title:
         layout["title"] = dict(y=0.98, yanchor="top", x=0, xanchor="left")
-    base = pio.templates[pio.templates.default or "plotly"]
+    # Explicitly `plotly`, NOT `pio.templates.default`: importing streamlit
+    # rewrites that default to its own "streamlit" template, whose colorway
+    # and colorscales are sentinel near-black values (#000001..#000010) that
+    # only mean anything once the frontend swaps them out. Inheriting those
+    # here made every chart that falls back to the colorway render black.
+    base = pio.templates["plotly"]
     return go.layout.Template(base).update(layout=layout)
 
 
