@@ -736,9 +736,26 @@ def _coauthorship_network(author_rows: pd.DataFrame) -> None:
             showlegend=False,
         )
     )
+    # O layout é um círculo fixo: a posição de um nó não codifica nada, então
+    # ticks e grade somem (e `scaleanchor` mantém o círculo redondo). Os eixos
+    # ficam nomeados dizendo exatamente isso, em vez de aparecerem anônimos.
     fig.update_layout(
-        xaxis=dict(visible=False, scaleanchor="y", scaleratio=1),
-        yaxis=dict(visible=False),
+        xaxis=dict(
+            title="Posição no layout circular (sem unidade)",
+            showticklabels=False,
+            showgrid=False,
+            zeroline=False,
+            ticks="",
+            scaleanchor="y",
+            scaleratio=1,
+        ),
+        yaxis=dict(
+            title="Posição no layout circular (sem unidade)",
+            showticklabels=False,
+            showgrid=False,
+            zeroline=False,
+            ticks="",
+        ),
         showlegend=False,
         height=650,
         hovermode="closest",
