@@ -104,28 +104,57 @@ def _prepare_filter_state(articles_df: pd.DataFrame) -> tuple[list[int], list[st
 
 
 def _render_relevance_filter() -> None:
-    """Opt-in cut on the semantic relevance score.
+    """Opt-in cut on the semantic relevance margin.
 
     Defaults to off: the score is an aid to screening, not ground truth, so it
-    must never silently change the numbers someone sees on first load. The
-    threshold is expressed as a percentile of this corpus, which is easier to
-    reason about than a raw cosine value.
+    must never silently change the numbers someone sees on first load.
+
+    The cut is the contrastive margin's own zero -- "closer to logistics than
+    to the review's topic" -- not a percentile. It used to be a percentile, and
+    that was the wrong instrument: the single-anchor score's two distributions
+    overlap on this corpus, so *any* percentile also discarded in-scope work.
+    The margin separates them (see `transform/semantics.py`), which is what
+    makes a fixed, explainable threshold possible.
     """
     signals = loaders.semantics()
     if signals.empty or "relevance_score" not in signals.columns:
         return
+    # A database whose last `semantic` run predates the contrastive anchor has
+    # no `offtopic_score` -- fall back to the old percentile rather than
+    # dropping the filter out of the sidebar entirely.
+    has_margin = "offtopic_score" in signals.columns
 
     st.checkbox(
         "Excluir artigos fora do escopo",
         key="exclude_offtopic",
         help=(
-            "Usa o score de relevância semântica (`--stage semantic`) para descartar artigos "
-            "distantes do tema da revisão — na prática, o grupo de logística/cadeia de "
-            "suprimentos que a busca por *distribution system planning* trouxe junto."
+            "Usa os sinais semânticos (`--stage semantic`) para descartar artigos distantes do "
+            "tema da revisão — na prática, o grupo de logística/cadeia de suprimentos que a busca "
+            "por *distribution system planning* trouxe junto."
         ),
     )
     if not st.session_state.get("exclude_offtopic"):
-        st.session_state.pop("global_min_relevance", None)
+        st.session_state.pop("global_min_margin", None)
+        return
+
+    if has_margin:
+        margin = signals["relevance_score"] - signals["offtopic_score"]
+        threshold = st.slider(
+            "Margem mínima",
+            min_value=0.0,
+            max_value=max(0.05, round(float(margin.quantile(0.75)), 2)),
+            value=0.0,
+            step=0.01,
+            key="offtopic_margin",
+            help=(
+                "0 descarta o que está mais perto do tema de logística do que do tema da "
+                "revisão. Acima disso, a triagem fica mais rígida."
+            ),
+        )
+        st.session_state.global_min_margin = threshold
+        st.caption(
+            f"Corte: margem ≥ {threshold:.2f} — {int((margin < threshold).sum()):,} artigos fora"
+        )
         return
 
     percentile = st.slider(
@@ -137,8 +166,8 @@ def _render_relevance_filter() -> None:
         help="10 remove os 10% menos relevantes do corpus.",
     )
     threshold = float(signals["relevance_score"].quantile(percentile / 100))
-    st.session_state.global_min_relevance = threshold
-    st.caption(f"Corte: score ≥ {threshold:.3f}")
+    st.session_state.global_min_margin = threshold
+    st.caption(f"Corte: score ≥ {threshold:.3f} (execute `--stage semantic` para usar a margem)")
 
 
 def render_global_filters(articles_df: pd.DataFrame) -> None:
@@ -189,7 +218,7 @@ def render_global_filters(articles_df: pd.DataFrame) -> None:
         st.session_state.global_year_range = (years[0], years[-1]) if years else None
         st.session_state.global_sources = []
         st.session_state.global_venues = []
-        st.session_state.pop("global_min_relevance", None)
+        st.session_state.pop("global_min_margin", None)
         st.session_state.exclude_offtopic = False
         st.rerun()
 
