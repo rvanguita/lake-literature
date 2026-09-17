@@ -92,8 +92,11 @@ def _volume_by_year_qualis(articles_df: pd.DataFrame) -> None:
     if not require_columns(articles_df, ["venue"]) or not articles_df["venue"].notna().any():
         return
 
-    venues = sorted(articles_df["venue"].dropna().unique())
-    match_df = loaders.venue_qualis_map(tuple(venues))
+    # Matches against the full corpus's venues (cached indefinitely), not a
+    # filtered subset -- see `loaders.all_venue_qualis_map` -- so toggling a
+    # global filter never re-triggers the rapidfuzz matching pass. `.map()`
+    # below simply ignores venues absent from the current filter scope.
+    match_df = loaders.all_venue_qualis_map()
     venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
 
     # ESTRATO_ORDER is best-to-worst with the unclassified bucket last; "up to

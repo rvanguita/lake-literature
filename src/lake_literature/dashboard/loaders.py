@@ -19,6 +19,7 @@ from lake_literature.dashboard.data import (
     bronze_doi_dropped_counts,
     layer_row_counts,
     load_articles_all_layers,
+    load_chunk_search_data,
     load_chunks,
     load_search_configs,
     pick_best_articles_layer,
@@ -41,9 +42,19 @@ def _to_list(value):
     return []
 
 
-def _dataframe_cache_key(value: pd.DataFrame) -> str:
-    """Stable cache key for frames containing JSON/list columns."""
-    return value.to_json(orient="split", date_format="iso", default_handler=str)
+def filter_signature() -> tuple:
+    """Cheap, stable key for the current global filter state.
+
+    Page-level `@st.cache_data` helpers that derive from `filtered_articles()`
+    take this as their argument instead of the frame itself: hashing three
+    small tuples costs nothing, while hashing the frame meant serializing it
+    (~3.5MB, ~20ms) on every cache *lookup*, several times per rerun.
+    """
+    return (
+        st.session_state.get("global_year_range"),
+        tuple(st.session_state.get("global_sources", ())),
+        tuple(st.session_state.get("global_venues", ())),
+    )
 
 
 @st.cache_data(ttl=60)
@@ -54,6 +65,15 @@ def row_counts() -> pd.DataFrame:
 @st.cache_data(ttl=60)
 def chunks() -> pd.DataFrame:
     return load_chunks()
+
+
+@st.cache_data(ttl=60)
+def chunk_search_data() -> pd.DataFrame:
+    """Full chunk rows (`text` + `embedding`) for the on-demand search box in
+    `pages/quality.py` -- callers should only invoke this once a query is
+    actually submitted, not on a plain page render (see `data.load_chunk_search_data`).
+    """
+    return load_chunk_search_data()
 
 
 @st.cache_data(ttl=60)
@@ -158,20 +178,24 @@ def articles() -> tuple[str, pd.DataFrame]:
     return layer, df
 
 
-@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: _dataframe_cache_key})
+@st.cache_data(ttl=60)
 def filter_articles(
-    df: pd.DataFrame,
     year_range: tuple[int, int] | None = None,
     sources: tuple[str, ...] = (),
     venues: tuple[str, ...] = (),
 ) -> pd.DataFrame:
-    """Apply the dashboard-wide filters to a normalized article frame.
+    """Apply the dashboard-wide filters to the best article layer.
 
     The filter is cached separately from the database read so changing a
     widget never causes another MySQL round-trip. Empty source/venue tuples
     mean "all", which also keeps the state valid when a partial layer lacks a
-    column.
+    column. The source frame is read from `articles()` (itself cached) rather
+    than taken as an argument, so the cache key stays three small tuples
+    instead of a serialized copy of the whole frame.
     """
+    _, df = articles()
+    if df.empty:
+        return df
     filtered = df.copy()
     if year_range and "year" in filtered.columns:
         if isinstance(year_range, (int, float)):
@@ -190,15 +214,13 @@ def filtered_articles() -> tuple[str, pd.DataFrame]:
     layer, df = articles()
     if df.empty:
         return layer, df
-    year_range = st.session_state.get("global_year_range")
-    sources = tuple(st.session_state.get("global_sources", ()))
-    venues = tuple(st.session_state.get("global_venues", ()))
-    return layer, filter_articles(df, year_range, sources, venues)
+    return layer, filter_articles(*filter_signature())
 
 
-@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: _dataframe_cache_key})
-def filter_chunks(chunks_df: pd.DataFrame, dois: tuple[str, ...]) -> pd.DataFrame:
+@st.cache_data(ttl=60)
+def filter_chunks(dois: tuple[str, ...]) -> pd.DataFrame:
     """Keep RAG chunks belonging to the currently filtered article set."""
+    chunks_df = chunks()
     if chunks_df.empty or "doi" not in chunks_df.columns or not dois:
         return chunks_df.iloc[0:0].copy() if not dois else chunks_df.copy()
     return chunks_df[chunks_df["doi"].isin(dois)].reset_index(drop=True)
@@ -206,12 +228,11 @@ def filter_chunks(chunks_df: pd.DataFrame, dois: tuple[str, ...]) -> pd.DataFram
 
 def filtered_chunks() -> pd.DataFrame:
     """Return chunks scoped to the globally filtered article DOI set."""
-    chunks_df = chunks()
     _, article_df = filtered_articles()
     if article_df.empty or "doi" not in article_df.columns:
-        return chunks_df.iloc[0:0].copy()
+        return chunks().iloc[0:0].copy()
     dois = tuple(article_df["doi"].dropna().astype(str).unique())
-    return filter_chunks(chunks_df, dois)
+    return filter_chunks(dois)
 
 
 def require_articles() -> pd.DataFrame:
@@ -235,11 +256,42 @@ def require_articles() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=None)
+def _qualis_reference() -> pd.DataFrame:
+    """Cached wrapper over `qualis.load_qualis_reference()`.
+
+    Parsing the national CAPES xlsx (171k rows across every evaluation area,
+    filtered down to ENGENHARIAS IV) takes ~9s via openpyxl; without this it
+    reran on every `venue_qualis_map` cache miss, since that cache is keyed
+    by the venues tuple rather than by this file.
+    """
+    return qualis.load_qualis_reference()
+
+
+@st.cache_data(ttl=None)
 def venue_qualis_map(venues: tuple[str, ...]) -> pd.DataFrame:
     """CAPES/Qualis (ENGENHARIAS IV) classification for each of `venues`.
 
     Cached indefinitely (the reference file doesn't change during a session) --
-    see `dashboard.qualis` for the fuzzy-matching rationale.
+    see `dashboard.qualis` for the fuzzy-matching rationale. Prefer
+    `all_venue_qualis_map()` from page code: matching against the full corpus
+    once means toggling a global filter never re-triggers rapidfuzz matching.
     """
-    qualis_df = qualis.load_qualis_reference()
-    return qualis.match_venues_to_qualis(list(venues), qualis_df)
+    return qualis.match_venues_to_qualis(list(venues), _qualis_reference())
+
+
+@st.cache_data(ttl=60)
+def all_venue_qualis_map() -> pd.DataFrame:
+    """CAPES/Qualis classification for every venue in the (unfiltered) best
+    article layer.
+
+    Matching against the full corpus's venues once, rather than whatever
+    subset survives the current global filters, means switching a
+    year/source/venue filter never re-triggers `venue_qualis_map`'s fuzzy
+    matching -- callers should filter the result by venue membership locally
+    instead of calling `venue_qualis_map` with a filtered venue tuple.
+    """
+    _, df = articles()
+    if df.empty or "venue" not in df.columns:
+        return pd.DataFrame(columns=["venue", "matched_title", "estrato", "score"])
+    venues = tuple(sorted(df["venue"].dropna().unique()))
+    return venue_qualis_map(venues)

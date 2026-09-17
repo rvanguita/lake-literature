@@ -88,7 +88,7 @@ def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
     st.subheader("🧠 Prontidão de embeddings")
     total = len(chunks_df)
     with_embedding = (
-        int(chunks_df["embedding"].notna().sum()) if "embedding" in chunks_df.columns else 0
+        int(chunks_df["has_embedding"].sum()) if "has_embedding" in chunks_df.columns else 0
     )
     pending = total - with_embedding
     pct = (with_embedding / total * 100) if total else 0.0
@@ -416,7 +416,7 @@ def _render_result_card(
 
 def _search_demo(chunks_df: pd.DataFrame) -> None:
     st.subheader("🔍 Busca nos chunks")
-    has_embeddings = "embedding" in chunks_df.columns and chunks_df["embedding"].notna().any()
+    has_embeddings = "has_embedding" in chunks_df.columns and bool(chunks_df["has_embedding"].any())
 
     if has_embeddings:
         st.caption(
@@ -431,9 +431,8 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
             "pipeline). Serve para mostrar, na prática, o formato dos trechos que um RAG real usaria como "
             "contexto de resposta."
         )
-    if not require_columns(
-        chunks_df, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."
-    ):
+    if chunks_df.empty or "doi" not in chunks_df.columns:
+        st.info("Nenhum chunk disponível nesta camada/filtro.")
         return
 
     query = st.text_input(
@@ -443,16 +442,30 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
     if not query:
         return
 
+    # `chunks_df` is the lightweight, filter-scoped frame (no `text`/
+    # `embedding` -- see `data.py::load_chunks`); the full columns are only
+    # loaded here, lazily, once a query is actually submitted, then scoped to
+    # the same filtered DOI set.
+    search_df = loaders.chunk_search_data()
+    if search_df.empty or "doi" not in search_df.columns:
+        st.info("Nenhum chunk disponível para busca nesta camada.")
+        return
+    scoped = search_df[search_df["doi"].isin(chunks_df["doi"])]
+    if not require_columns(
+        scoped, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."
+    ):
+        return
+
     if has_embeddings:
-        matches = semantic_search(query, chunks_df, top_k=SEARCH_DEMO_MAX_RESULTS)
+        matches = semantic_search(query, scoped, top_k=SEARCH_DEMO_MAX_RESULTS)
         st.caption(
-            f"Top {len(matches):,} chunks mais similares à consulta (de {len(chunks_df):,} disponíveis)."
+            f"Top {len(matches):,} chunks mais similares à consulta (de {len(scoped):,} disponíveis)."
         )
     else:
-        mask = chunks_df["text"].str.contains(query, case=False, na=False, regex=False)
+        mask = scoped["text"].str.contains(query, case=False, na=False, regex=False)
         n_total_matches = int(mask.sum())
-        matches = chunks_df.loc[mask].head(SEARCH_DEMO_MAX_RESULTS)
-        st.caption(f"{n_total_matches:,} de {len(chunks_df):,} chunks contêm o termo buscado.")
+        matches = scoped.loc[mask].head(SEARCH_DEMO_MAX_RESULTS)
+        st.caption(f"{n_total_matches:,} de {len(scoped):,} chunks contêm o termo buscado.")
 
     if matches.empty:
         return

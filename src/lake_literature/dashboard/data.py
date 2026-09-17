@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
-from sqlalchemy import inspect, text
+from sqlalchemy import MetaData, Table, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from lake_literature.db.engines import get_engine
@@ -99,7 +99,33 @@ def load_articles_all_layers() -> dict[str, pd.DataFrame]:
     return {layer: load_articles(layer) for layer in ("bronze", "silver", "gold")}
 
 
+_CHUNK_LIGHT_COLUMNS = ("id", "doi", "seq", "chunk_type", "char_len", "embed_model", "created_at")
+
+
 def load_chunks() -> pd.DataFrame:
+    """Lightweight chunk metadata from `gold.lit_chunks`: everything the
+    dashboard's aggregate stats/charts need, without the `text` and
+    `embedding` columns. Both are large per row -- `embedding` is a ~768-float
+    JSON vector -- and unused outside the on-demand search box in
+    `pages/quality.py`, which pulls them separately via
+    `load_chunk_search_data` only once a query is actually submitted.
+    Deserializing them here for every row dominated render time on every page
+    that touches chunk counts (~7s for ~6k rows just for this one query).
+    """
+    if not table_exists("gold", "lit_chunks"):
+        return pd.DataFrame()
+    engine = get_engine("gold")
+    table = Table("lit_chunks", MetaData(), autoload_with=engine)
+    columns = [table.c[name] for name in _CHUNK_LIGHT_COLUMNS if name in table.c]
+    columns.append(table.c.embedding.is_not(None).label("has_embedding"))
+    return pd.read_sql_query(select(*columns), engine)
+
+
+def load_chunk_search_data() -> pd.DataFrame:
+    """Full chunk rows (`text` + `embedding`), for the search box in
+    `pages/quality.py` -- loaded lazily, only once a query is actually
+    submitted, never on a plain page render.
+    """
     if not table_exists("gold", "lit_chunks"):
         return pd.DataFrame()
     engine = get_engine("gold")

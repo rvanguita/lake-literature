@@ -70,12 +70,22 @@ def render() -> None:
         (tab_elsevier, SOURCE_LABELS["elsevier"], "elsevier", SOURCE_COLORS["elsevier"]),
     ):
         with tab:
-            series = yearly_counts(articles_df, source=source)
-            result = fit_and_forecast(series)
-            _render_series_forecast(label, color, result)
+            _render_series_forecast(label, color, _series_forecast(source))
 
     with tab_keywords:
-        _keyword_growth_ranking(articles_df)
+        _keyword_growth_ranking()
+
+
+@st.cache_data(ttl=60)
+def _series_forecast(source: str | None) -> ForecastResult:
+    """Volume forecast for one source (or the whole corpus when `source` is None).
+
+    Cached for the same reason as `_keyword_forecasts`: the fit is a
+    rolling-origin CV over 3 candidate models, and it reads the unfiltered
+    layer, so it never changes between reruns.
+    """
+    _, articles_df = loaders.articles()
+    return fit_and_forecast(yearly_counts(articles_df, source=source))
 
 
 def _render_series_forecast(label: str, color: str, result: ForecastResult) -> None:
@@ -277,18 +287,24 @@ def _keyword_trend_lines(
     )
 
 
-def _keyword_growth_ranking(articles_df: pd.DataFrame) -> None:
-    st.subheader("🏷️ Tópicos com maior crescimento projetado")
+@st.cache_data(ttl=60)
+def _keyword_forecasts() -> tuple[str, list[dict], dict[str, ForecastResult], int | None]:
+    """Fit a forecast per eligible keyword; returns `(status, rows, results, final_year)`.
+
+    Cached because it fits 3 candidate models per keyword per CV fold —
+    hundreds of sklearn fits — and this page reads the unfiltered layer, so
+    the result never changes between reruns. Without this it re-ran in full
+    on every widget interaction.
+    """
+    _, articles_df = loaders.articles()
     kw_exploded = explode_keywords(articles_df)
     if kw_exploded.empty or "year" not in kw_exploded.columns:
-        st.info("Coluna 'keywords' não disponível nesta camada.")
-        return
+        return "no_keywords", [], {}, None
 
     counts = kw_exploded["keyword"].value_counts()
     eligible = counts[counts >= MIN_KEYWORD_OCCURRENCES].index.tolist()
     if not eligible:
-        st.info(f"Nenhuma palavra-chave com pelo menos {MIN_KEYWORD_OCCURRENCES} ocorrências.")
-        return
+        return "none_eligible", [], {}, None
 
     rows = []
     results_by_keyword: dict[str, ForecastResult] = {}
@@ -313,7 +329,19 @@ def _keyword_growth_ranking(articles_df: pd.DataFrame) -> None:
                 "modelo": _MODEL_LABELS.get(result.chosen_model, result.chosen_model),
             }
         )
+    return "ok", rows, results_by_keyword, final_forecast_year
 
+
+def _keyword_growth_ranking() -> None:
+    st.subheader("🏷️ Tópicos com maior crescimento projetado")
+    status, rows, results_by_keyword, final_forecast_year = _keyword_forecasts()
+
+    if status == "no_keywords":
+        st.info("Coluna 'keywords' não disponível nesta camada.")
+        return
+    if status == "none_eligible":
+        st.info(f"Nenhuma palavra-chave com pelo menos {MIN_KEYWORD_OCCURRENCES} ocorrências.")
+        return
     if not rows:
         st.info("Não foi possível ajustar um modelo para nenhuma palavra-chave elegível.")
         return

@@ -388,6 +388,30 @@ def _cited_by_year(articles_df: pd.DataFrame) -> None:
     )
 
 
+def _modal_source(rows: pd.DataFrame, key: str, keys_shown) -> pd.Series | None:
+    """Most frequent `source` per entity, for the entities actually plotted.
+
+    Scoped to `keys_shown` first: the previous
+    `groupby(key)["source"].agg(lambda s: s.mode().iat[0])` ran a per-group
+    mode over every author/venue in the corpus (thousands of groups) just to
+    colour 15 bars. Ties resolve to the alphabetically first source, matching
+    `Series.mode()`, because the groupby output is sorted and the sort below
+    is stable.
+    """
+    if "source" not in rows.columns:
+        return None
+    scoped = rows[rows[key].isin(keys_shown)]
+    if scoped.empty:
+        return None
+    counts = scoped.groupby([key, "source"], observed=True).size()
+    return (
+        counts.sort_values(ascending=False)
+        .reset_index()
+        .drop_duplicates(key)
+        .set_index(key)["source"]
+    )
+
+
 def _top_authors(articles_df: pd.DataFrame) -> None:
     st.subheader("✍️ Autores mais prolíficos")
     if not require_columns(articles_df, ["authors"]):
@@ -403,9 +427,7 @@ def _top_authors(articles_df: pd.DataFrame) -> None:
         return
 
     top_authors = author_rows["author"].value_counts().head(15)
-    modal_source = None
-    if "source" in author_rows.columns:
-        modal_source = author_rows.groupby("author")["source"].agg(lambda s: s.mode().iat[0])
+    modal_source = _modal_source(author_rows, "author", top_authors.index)
 
     fig = topn_hbar(
         top_authors,
@@ -439,9 +461,7 @@ def _venue_impact(articles_df: pd.DataFrame) -> None:
         st.info("Nenhum periódico com artigos suficientes com contagem de citações nesta camada.")
         return
 
-    modal_source = None
-    if "source" in cited_venues.columns:
-        modal_source = cited_venues.groupby("venue")["source"].agg(lambda s: s.mode().iat[0])
+    modal_source = _modal_source(cited_venues, "venue", venue_impact.index)
 
     article_counts = venue_impact["articles"]
     fig = topn_hbar(

@@ -47,11 +47,14 @@ MIN_PAPERS_FOR_NETWORK = 4
 TOP_NETWORK_AUTHORS = 18
 
 
-@st.cache_data(
-    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
-)
-def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
+# Both helpers take `loaders.filter_signature()` rather than the frame itself:
+# hashing the frame meant serializing ~3.5MB to JSON on every cache lookup,
+# which cost more than the work being cached. They re-read the filtered frame
+# internally, so the signature fully determines the result.
+@st.cache_data(ttl=60)
+def _author_table(filter_sig: tuple) -> pd.DataFrame:
     """Explode authors (with byline position), canonicalize identity, keep one display name per key."""
+    _, articles_df = loaders.filtered_articles()
     exploded = explode_authors_with_position(articles_df)
     if exploded.empty:
         return exploded
@@ -62,10 +65,9 @@ def _author_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     return exploded
 
 
-@st.cache_data(
-    ttl=60, hash_funcs={pd.DataFrame: lambda df: df.to_json(orient="split", default_handler=str)}
-)
-def _author_year_matrix_cached(articles_df: pd.DataFrame) -> pd.DataFrame:
+@st.cache_data(ttl=60)
+def _author_year_matrix_cached(filter_sig: tuple) -> pd.DataFrame:
+    _, articles_df = loaders.filtered_articles()
     return author_year_matrix(articles_df)
 
 
@@ -77,7 +79,7 @@ def render() -> None:
     )
 
     articles_df = loaders.require_articles()
-    author_rows = _author_table(articles_df)
+    author_rows = _author_table(loaders.filter_signature())
 
     if author_rows.empty:
         st.info("Coluna 'authors' não disponível ou vazia nesta camada.")
@@ -523,7 +525,7 @@ def _volume_vs_impact(author_rows: pd.DataFrame) -> None:
 
 def _full_output_table(articles_df: pd.DataFrame) -> pd.DataFrame:
     st.subheader("📋 Produção completa por autor e ano")
-    matrix = _author_year_matrix_cached(articles_df)
+    matrix = _author_year_matrix_cached(loaders.filter_signature())
     if matrix.empty:
         st.info("Sem anos válidos para montar a tabela.")
         return matrix

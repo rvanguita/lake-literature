@@ -407,8 +407,14 @@ def _qualis_match_data(
     Returns `(match_df, with_estrato, totals_by_estrato, estrato_order)`; `with_estrato` is
     `articles_df` with an added `estrato` column (each article's venue's CAPES/Qualis tier).
     """
-    venues = sorted(articles_df["venue"].dropna().unique())
-    match_df = loaders.venue_qualis_map(tuple(venues))
+    # Filter the full-corpus match table down to venues in the current filter
+    # scope, rather than calling `venue_qualis_map` with a filtered venues
+    # tuple directly -- that would re-trigger the rapidfuzz matching pass
+    # (and, transitively, the ~9s CAPES xlsx parse) on every global filter
+    # change, since the venues tuple is the cache key.
+    venues = set(articles_df["venue"].dropna().unique())
+    match_df = loaders.all_venue_qualis_map()
+    match_df = match_df[match_df["venue"].isin(venues)].reset_index(drop=True)
     match_df["estrato"] = match_df["estrato"].fillna(NOT_CLASSIFIED)
     # A raw None in a string column renders as literal "undefined" in Streamlit's
     # dataframe grid (pandas' Arrow-backed string dtype stores it as a genuine
