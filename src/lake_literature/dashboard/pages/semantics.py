@@ -150,10 +150,12 @@ def _semantic_map(scored: pd.DataFrame) -> None:
     )
     fig.update_traces(marker=dict(size=6))
     # As coordenadas do t-SNE não têm unidade nem orientação interpretável --
-    # só a vizinhança entre pontos significa algo.
+    # só a vizinhança entre pontos significa algo --, por isso os valores dos
+    # ticks ficam ocultos. Os eixos continuam nomeados: sem nome nenhum, o
+    # leitor não sabe sequer em que plano está olhando.
     fig.update_layout(
-        xaxis=dict(title="", showticklabels=False),
-        yaxis=dict(title="", showticklabels=False),
+        xaxis=dict(title="Dimensão 1 (t-SNE)", showticklabels=False),
+        yaxis=dict(title="Dimensão 2 (t-SNE)", showticklabels=False),
         legend_title_text="Tema",
     )
     render_chart(

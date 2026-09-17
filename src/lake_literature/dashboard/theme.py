@@ -52,6 +52,18 @@ TOTAL_LABEL = "Total"
 
 CHART_HEIGHT = 420  # consistent height for side-by-side chart pairs
 
+# The chart canvas is transparent so the page's own gradient shows through it,
+# instead of a slab of one flat color sitting on top of a gradient that has
+# already moved on by the bottom of a long page. This is the one chart-chrome
+# color that is deliberately NOT a light/dark token: transparent is correct in
+# both themes by construction, because it *is* whatever the page is.
+# `chart_bg` stays a solid token, for the things that need a real color to
+# stand on: the gauge track in `quality.py` and the "partial year" marker halo
+# in `forecasting.py`.
+CHART_PAPER_BG = "rgba(0,0,0,0)"
+
+_CHART_FONT_FAMILY = "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+
 # ---------------------------------------------------------------------------
 # Light/dark tokens
 #
@@ -381,14 +393,15 @@ def apply_dashboard_theme() -> None:
             border: 1px solid rgba(255, 107, 107, 0.3);
         }}
 
+        /* The figure itself is transparent (see CHART_PAPER_BG); the
+           containers Streamlit wraps it in have to be too, or they'd repaint
+           the flat slab we just removed. */
+        [data-testid="stPlotlyChart"],
         .stPlotlyChart,
         .js-plotly-plot,
-        .plot-container {{
-            background: {t["chart_bg"]} !important;
-        }}
-
+        .plot-container,
         .js-plotly-plot .svg-container {{
-            background: {t["chart_bg"]} !important;
+            background: {CHART_PAPER_BG} !important;
         }}
         </style>
         """,
@@ -445,13 +458,9 @@ def _figure_template(theme_type: str, has_title: bool):
         title_font=dict(color=t["chart_text"]),
     )
     layout = dict(
-        font=dict(
-            family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-            size=12,
-            color=t["chart_text"],
-        ),
-        paper_bgcolor=t["chart_bg"],
-        plot_bgcolor=t["chart_bg"],
+        font=dict(family=_CHART_FONT_FAMILY, size=12, color=t["chart_text"]),
+        paper_bgcolor=CHART_PAPER_BG,
+        plot_bgcolor=CHART_PAPER_BG,
         # The fallback for any chart that doesn't pass its own colors, so those
         # match the palette the rest of the dashboard uses instead of Plotly's
         # stock one.
@@ -469,6 +478,19 @@ def _figure_template(theme_type: str, has_title: bool):
             bordercolor=t["legend_border"],
         ),
         annotationdefaults=dict(font=dict(weight="bold", color=t["chart_annotation"])),
+        # Plotly derives the hover box's fill from plot_bgcolor/paper_bgcolor,
+        # which are now transparent -- an "x unified" tooltip would come out as
+        # unreadable text floating over the chart. The trade-off of naming it
+        # here is that every hover box gets the same themed fill instead of the
+        # hovered trace's own color; the border still follows the trace.
+        hoverlabel=dict(
+            bgcolor=t["chart_bg"],
+            font=dict(color=t["chart_text"], family=_CHART_FONT_FAMILY),
+        ),
+        # Same reason: the modebar's icon color is picked by contrast against
+        # paper_bgcolor, and a transparent one reads as black -- which made the
+        # icons invisible on the light theme's white page.
+        modebar=dict(bgcolor=CHART_PAPER_BG, color=t["muted"], activecolor=t["accent"]),
     )
     if has_title:
         layout["title"] = dict(y=0.98, yanchor="top", x=0, xanchor="left")
@@ -483,6 +505,7 @@ def _figure_template(theme_type: str, has_title: bool):
 
 def polish_figure_layout(fig, height: int | None = None) -> None:
     """Apply the unified light/dark chart styling to `fig`, in place."""
+    t = _tokens()
     has_title = bool(fig.layout.title and fig.layout.title.text)
     if not has_title:
         # `charts.py`'s builders always pass `title=title` to `update_layout`,
@@ -498,13 +521,26 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
     # Margin stays out of the template: Plotly Express sets `margin.t` on the
     # figure itself, and a figure-level value wins over a template default,
     # so a templated margin would silently lose to px's own.
+    #
+    # The background and font are here for a related reason, and must NOT be
+    # collapsed back into the template: Streamlit's frontend runs
+    # `layoutWithThemeDefaults` over every Plotly spec -- including with
+    # `theme=None` -- and it fills `paper_bgcolor`, `plot_bgcolor` and `font`
+    # from *Streamlit's own* theme whenever the figure's layout doesn't carry
+    # them. It reads the figure's layout, never the template, so a
+    # template-only background lost to Streamlit's near-black `bgColor`
+    # (which follows the browser/system setting, not our sidebar toggle) and
+    # every chart rendered as a black slab. Spelling them out on the figure is
+    # what makes the dashboard's own theme win.
     fig.update_layout(
         template=_figure_template(_active_theme_type(), has_title),
         margin=dict(l=40, r=40, t=105 if has_title else 55, b=40),
+        paper_bgcolor=CHART_PAPER_BG,
+        plot_bgcolor=CHART_PAPER_BG,
+        font=dict(family=_CHART_FONT_FAMILY, size=12, color=t["chart_text"]),
     )
     # Annotations already on the figure don't pick up the template's
     # `annotationdefaults`, so they still need an explicit pass.
-    t = _tokens()
     fig.update_annotations(font=dict(weight="bold", color=t["chart_annotation"]))
     try:
         fig.update_traces(textfont=dict(weight="bold", color=t["chart_annotation"]))

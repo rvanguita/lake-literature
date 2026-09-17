@@ -63,11 +63,13 @@ rules exist to keep it from drifting back.
   free. `render_chart` logs a warning naming any chart that still has a bare
   visible axis — run the app and read the terminal to audit the whole
   dashboard at once.
-  The exception is an axis whose coordinates genuinely mean nothing: the t-SNE
-  semantic map and the co-authorship network hide theirs (`visible=False` /
-  `showticklabels=False`, which also silences the warning) and say why in a
-  comment plus the chart's caption. Hiding an axis is a decision to document,
-  not a default.
+  An axis whose coordinates genuinely mean nothing — the t-SNE semantic map,
+  the co-authorship network — hides its **tick values** (`showticklabels=False`,
+  plus `showgrid`/`zeroline`/`ticks` off for a graph canvas) but still carries a
+  name (`Dimensão 1 (t-SNE)`, `Posição no layout circular (sem unidade)`), with
+  a comment and a caption saying why the numbers are gone. Both used to set
+  `title=""`/`visible=False` and shipped as anonymous axes; hiding the *name* is
+  never the answer, and silencing `render_chart`'s warning is not a reason to.
 - Guard missing columns with `components.require_columns(df, [...], message)`
   instead of a bespoke `st.info(...)`.
 - "Total" is a **real series/trace** (`TOTAL_COLOR`, `TOTAL_LABEL` from
@@ -109,12 +111,30 @@ The single source of truth is `st.session_state["dashboard_theme_mode"]`
 existed). `theme._active_theme_type()` reads that key, `theme._tokens()`
 returns the matching palette (`_DARK_TOKENS` / `_LIGHT_TOKENS`), and
 `apply_dashboard_theme()` / `polish_figure_layout()` build their CSS /
-Plotly `paper_bgcolor`/`plot_bgcolor`/font/grid colors from it. **Never
-hardcode a hex color for chart backgrounds or the injected CSS** — add a new
-token to both dicts instead, or the color will be wrong in one of the two
-themes. A data color scale (e.g. `color_continuous_scale` on a heatmap or
-scatter) is not chrome and is fine to hardcode — it colors marks by value,
-not the page/chart background.
+Plotly font/grid colors from it. **Never hardcode a hex color for chart
+backgrounds or the injected CSS** — add a new token to both dicts instead, or
+the color will be wrong in one of the two themes. A data color scale (e.g.
+`color_continuous_scale` on a heatmap or scatter) is not chrome and is fine to
+hardcode — it colors marks by value, not the page/chart background.
+
+The chart canvas itself is the one exception: `theme.CHART_PAPER_BG`
+(`rgba(0,0,0,0)`) is a plain module constant, not a token, because a
+transparent canvas is correct in both themes — it lets the page's gradient
+through instead of laying a flat slab over it. `chart_bg` is still a token and
+still solid, for the things that need a real color to stand on (the gauge track
+in `quality.py`, the partial-year marker halo in `forecasting.py`, the hover
+box). Transparency is also why the shared template names `hoverlabel` and
+`modebar` explicitly: Plotly derives both from `paper_bgcolor`, and a
+transparent one gives an unreadable tooltip and invisible modebar icons.
+
+**Chart background and font must be set on the figure, not only on the shared
+template** — `polish_figure_layout` does this and says why. Streamlit's frontend
+runs `layoutWithThemeDefaults` over every Plotly spec, *including* with
+`theme=None`, and fills `paper_bgcolor`, `plot_bgcolor` and `font` from
+Streamlit's own theme (which follows the browser/system setting, not our
+toggle) whenever the figure's layout doesn't carry them. It never reads the
+template. Declaring them template-only is what made every chart render on a
+near-black background; `tests/test_theme.py` guards it.
 
 ### Avoiding title/legend overlap
 
