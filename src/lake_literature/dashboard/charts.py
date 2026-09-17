@@ -160,34 +160,85 @@ def topn_hbar(
     return fig
 
 
-def lorenz_chart(lorenz_df: pd.DataFrame) -> go.Figure:
+def source_topn_hbar(
+    df: pd.DataFrame,
+    label_col: str,
+    *,
+    title: str | None = None,
+    x_title: str | None = None,
+) -> go.Figure:
+    """Stacked IEEE/Elsevier horizontal bars, ranked by `total` (highest on top).
+
+    `df` must have the shape produced by `analytics.source_counts_by`:
+    columns `[label_col, "ieee", "elsevier", "total"]`, already head-limited
+    by the caller. The horizontal counterpart to `source_bars`' vertical
+    stacked bars -- for a top-N ranking, coloring a single bar by an entity's
+    *modal* source (`topn_hbar`'s `color_by`) hides a source with fewer, but
+    real, contributions whenever the corpus is source-skewed enough that
+    "top overall" and "top in the minority source" barely overlap (every bar
+    then renders in the majority source's color, looking like the minority
+    source doesn't exist at all).
+    """
+    ordered = df.sort_values("total", ascending=True)
+    fig = go.Figure()
+    fig.add_bar(
+        y=ordered[label_col],
+        x=ordered["ieee"],
+        name=SOURCE_LABELS["ieee"],
+        orientation="h",
+        marker_color=SOURCE_COLORS["ieee"],
+    )
+    fig.add_bar(
+        y=ordered[label_col],
+        x=ordered["elsevier"],
+        name=SOURCE_LABELS["elsevier"],
+        orientation="h",
+        marker_color=SOURCE_COLORS["elsevier"],
+    )
+    fig.update_layout(
+        barmode="stack",
+        title=title,
+        xaxis_title=x_title,
+        yaxis_title="",
+        showlegend=True,
+    )
+    polish_figure_layout(fig)
+    return fig
+
+
+def lorenz_chart(series: dict[str, pd.DataFrame]) -> go.Figure:
     """Lorenz curve: cumulative share of output vs. cumulative share of authors.
 
-    `lorenz_df` must have the shape from `analytics.lorenz_curve` (columns
-    `share_of_authors`, `share_of_output`). The perfect-equality diagonal is a
-    second real trace, not a reference line -- consistent with the "Total is a
+    `series` maps a source key ("ieee"/"elsevier"/"total") to a DataFrame with
+    the shape from `analytics.lorenz_curve` (columns `share_of_authors`,
+    `share_of_output`) -- one real line trace per key, colored via
+    `SOURCE_COLORS`/`SOURCE_LABELS` ("ieee"/"elsevier") or `TOTAL_COLOR`/
+    `TOTAL_LABEL` (anything else, i.e. "total"), matching `source_lines`'s
+    3-real-series style. The perfect-equality diagonal is always a second kind
+    of real trace, not a reference line -- consistent with the "Total is a
     real series" rule, generalized to this chart's own benchmark.
     """
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=lorenz_df["share_of_authors"],
-            y=lorenz_df["share_of_output"],
-            name="Distribuição observada",
-            mode="lines+markers",
-            line=dict(color=CATEGORICAL_PALETTE[0], width=2.5),
-            marker=dict(size=4),
-            fill="tozeroy",
-            fillcolor=hex_to_rgba(CATEGORICAL_PALETTE[0], 0.15),
+    for key, lorenz_df in series.items():
+        color = SOURCE_COLORS.get(key, TOTAL_COLOR)
+        name = SOURCE_LABELS.get(key, TOTAL_LABEL)
+        fig.add_trace(
+            go.Scatter(
+                x=lorenz_df["share_of_authors"],
+                y=lorenz_df["share_of_output"],
+                name=name,
+                mode="lines+markers",
+                line=dict(color=color, width=2.5),
+                marker=dict(size=4),
+            )
         )
-    )
     fig.add_trace(
         go.Scatter(
             x=[0, 1],
             y=[0, 1],
             name="Equidade perfeita",
             mode="lines",
-            line=dict(color=TOTAL_COLOR, width=2, dash="dash"),
+            line=dict(color=OTHER_COLOR, width=2, dash="dash"),
         )
     )
     fig.update_layout(
