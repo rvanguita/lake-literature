@@ -56,7 +56,7 @@ def filter_signature() -> tuple:
         st.session_state.get("global_year_range"),
         tuple(st.session_state.get("global_sources", ())),
         tuple(st.session_state.get("global_venues", ())),
-        st.session_state.get("global_min_relevance"),
+        st.session_state.get("global_min_margin"),
     )
 
 
@@ -110,7 +110,16 @@ def with_semantics(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or signals.empty or "doi" not in df.columns:
         return df
     columns = ["doi", "relevance_score", "theme_id", "theme_label", "map_x", "map_y"]
-    return df.merge(signals[columns], on="doi", how="left")
+    if "offtopic_score" in signals.columns:
+        columns.append("offtopic_score")
+    merged = df.merge(signals[columns], on="doi", how="left")
+    if "offtopic_score" in merged.columns:
+        # The screening signal, derived once here so no page repeats the
+        # subtraction: how much closer an abstract sits to the review's topic
+        # than to the logistics reading of the same query. Zero is the
+        # meaningful threshold -- see transform/semantics.py.
+        merged["relevance_margin"] = merged["relevance_score"] - merged["offtopic_score"]
+    return merged
 
 
 def _normalize_article_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -215,7 +224,7 @@ def filter_articles(
     year_range: tuple[int, int] | None = None,
     sources: tuple[str, ...] = (),
     venues: tuple[str, ...] = (),
-    min_relevance: float | None = None,
+    min_margin: float | None = None,
 ) -> pd.DataFrame:
     """Apply the dashboard-wide filters to the best article layer.
 
@@ -226,20 +235,22 @@ def filter_articles(
     than taken as an argument, so the cache key stays a few small values
     instead of a serialized copy of the whole frame.
 
-    `min_relevance` drops articles whose abstract sits too far from the
-    review's topic anchor (see `transform/semantics.py`). Articles with no
-    score yet are always kept: a missing signal must never silently shrink the
-    corpus.
+    `min_margin` drops articles that sit closer to the logistics reading of
+    "distribution system planning" than to the review's own topic -- the
+    contrastive margin from `transform/semantics.py`, where 0 is the natural
+    cut. Articles with no score yet are always kept: a missing signal must
+    never silently shrink the corpus.
     """
     _, df = articles()
     if df.empty:
         return df
-    if min_relevance is not None:
+    if min_margin is not None:
         scored = with_semantics(df)
-        if "relevance_score" in scored.columns:
-            df = scored[
-                scored["relevance_score"].isna() | scored["relevance_score"].ge(min_relevance)
-            ]
+        # `relevance_margin` needs `offtopic_score`, which a database whose
+        # last `semantic` run predates the contrastive anchor doesn't have.
+        column = "relevance_margin" if "relevance_margin" in scored.columns else "relevance_score"
+        if column in scored.columns:
+            df = scored[scored[column].isna() | scored[column].ge(min_margin)]
     filtered = df.copy()
     if year_range and "year" in filtered.columns:
         if isinstance(year_range, (int, float)):

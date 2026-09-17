@@ -85,6 +85,14 @@ class Semantics(Base):
     # vectors are L2-normalized, so this is in [-1, 1] and in practice ~0.4-0.9.
     relevance_score: Mapped[float] = mapped_column(Float)
 
+    # Cosine similarity to the *other* reading of "distribution system planning"
+    # (logistics/supply chain). Nullable because rows written before the
+    # contrastive anchor existed don't have it. The screening signal is the
+    # margin `relevance_score - offtopic_score`, whose zero means "closer to
+    # logistics than to the review's topic" -- a threshold a reviewer can
+    # defend, unlike a percentile of a distribution that overlaps.
+    offtopic_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     theme_id: Mapped[int] = mapped_column(Integer, index=True)
     theme_label: Mapped[str] = mapped_column(String(255))
 

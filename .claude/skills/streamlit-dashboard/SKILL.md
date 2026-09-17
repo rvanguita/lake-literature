@@ -203,6 +203,15 @@ call `render_chart`.
   growth), not a heavier model — the usable series is short (~16 yearly
   points from `MIN_TRAIN_YEAR = 2010` onward). Don't reach for a model class
   that needs more data than the corpus has just because it's "more ML."
+- The semantic signals (`gold.lit_semantics`, joined on `doi` by
+  `loaders.with_semantics`) carry **two** scores: `relevance_score` (cosine to
+  the review's topic anchor) and `offtopic_score` (cosine to the logistics
+  reading of the same query). What screens an article is the derived
+  `relevance_margin` between them, and its **zero** is the threshold — not a
+  percentile, which the two overlapping distributions made unusable. Both the
+  sidebar filter and the Semântica page fall back to the old percentile view
+  when `offtopic_score` is absent, i.e. when the database's last `semantic` run
+  predates the contrastive anchor; keep that fallback when editing either.
 - `lit_gold.chunks.embedding` is filled by the `embed` pipeline stage
   (`transform/embeddings.py`, via `fastembed`'s local ONNX model
   `BAAI/bge-small-en-v1.5`, no API key), not automatically by `--stage gold`.

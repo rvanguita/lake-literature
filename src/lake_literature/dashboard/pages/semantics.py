@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from lake_literature.dashboard import loaders
@@ -15,10 +16,25 @@ from lake_literature.dashboard.components import (
     render_chart,
     require_columns,
 )
-from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, TREND_DOWN_COLOR
+from lake_literature.dashboard.theme import (
+    CATEGORICAL_PALETTE,
+    TREND_DOWN_COLOR,
+    theme_tokens,
+)
 
 LOW_RELEVANCE_PERCENTILE = 10
 TOP_REVIEW_ROWS = 40
+
+# How the semantic map can be colored. The theme is the default, but a reviewer
+# screening a corpus wants to ask the same picture different questions -- where
+# the off-topic mass sits, whether a region is recent or old, which publisher
+# indexed it.
+MAP_COLOR_OPTIONS = {
+    "Tema": "theme_label",
+    "Relevância": "relevance_margin",
+    "Ano": "year",
+    "Fonte": "source",
+}
 
 
 def render() -> None:
@@ -72,7 +88,83 @@ def render() -> None:
 
 
 def _relevance_screening(scored: pd.DataFrame) -> None:
+    # The margin needs `offtopic_score`, written by the contrastive anchor; a
+    # database whose last `semantic` run predates it still gets the old view.
+    has_margin = "relevance_margin" in scored.columns and scored["relevance_margin"].notna().any()
+    if not has_margin:
+        _legacy_relevance_screening(scored)
+        return
+
+    st.subheader("Distribuição da margem de relevância")
+    margin = scored["relevance_margin"]
+    low = scored[margin < 0]
+
+    metric_row(
+        [
+            ("📄 Artigos com score", f"{len(scored):,}", None),
+            ("📊 Margem mediana", f"{margin.median():+.3f}", None),
+            (
+                "🚩 Fora do escopo (margem < 0)",
+                f"{len(low):,}",
+                f"{100 * len(low) / len(scored):.1f}% do corpus",
+            ),
+        ]
+    )
+
+    fig = px.histogram(
+        scored,
+        x="relevance_margin",
+        nbins=60,
+        title="Quanto cada artigo pende para o tema da revisão, e não para logística",
+        color_discrete_sequence=[CATEGORICAL_PALETTE[0]],
+    )
+    fig.update_layout(
+        xaxis_title="Margem (relevância − proximidade a logística)",
+        yaxis_title="Quantidade de artigos",
+        showlegend=False,
+    )
+    render_chart(
+        fig,
+        caption="Cada resumo é comparado com **duas** âncoras: o tema da revisão e a leitura "
+        "logística da mesma busca. A margem é a diferença, e o **zero é o corte**: à esquerda dele "
+        "estão os artigos que o próprio texto coloca mais perto de cadeia de suprimentos do que de "
+        "redes de distribuição de energia. Com uma âncora só, as duas distribuições se sobrepunham e "
+        "qualquer percentil descartava também trabalho dentro do escopo. Para aplicar o corte a "
+        "**todos** os gráficos, use o filtro na barra lateral.",
+    )
+
+    st.divider()
+    st.subheader(f"Fora do escopo — {len(low):,} artigos para revisão manual")
+    st.caption(
+        "Ordenados da margem mais negativa para a menos negativa. O score é um auxílio à triagem, "
+        "não um veredito: revise antes de descartar."
+    )
+    review = low.sort_values("relevance_margin").head(TOP_REVIEW_ROWS).copy()
+    for column in ("relevance_margin", "relevance_score"):
+        review[column] = review[column].round(3)
+    article_table(
+        review,
+        [
+            "relevance_margin",
+            "relevance_score",
+            "theme_label",
+            "title",
+            "year",
+            "venue",
+            "source",
+            "doi",
+        ],
+        download_key="fora_do_escopo",
+    )
+
+
+def _legacy_relevance_screening(scored: pd.DataFrame) -> None:
+    """The percentile view, for a database that predates the contrastive anchor."""
     st.subheader("Distribuição do score de relevância")
+    st.info(
+        "Esta camada foi gerada antes da âncora contrastiva — rode `--stage semantic` para usar a "
+        "margem, cujo corte em zero substitui o percentil abaixo."
+    )
     threshold = float(scored["relevance_score"].quantile(LOW_RELEVANCE_PERCENTILE / 100))
     low = scored[scored["relevance_score"] < threshold]
 
@@ -110,8 +202,7 @@ def _relevance_screening(scored: pd.DataFrame) -> None:
     render_chart(
         fig,
         caption="O score é o cosseno entre o resumo e um texto-âncora que descreve o escopo da "
-        "revisão. A cauda à esquerda concentra os falsos positivos da busca. Para excluí-los de "
-        "**todos** os gráficos do dashboard, use o filtro na barra lateral.",
+        "revisão. A cauda à esquerda concentra os falsos positivos da busca.",
     )
 
     st.divider()
@@ -136,19 +227,49 @@ def _semantic_map(scored: pd.DataFrame) -> None:
 
     plot_df = scored.dropna(subset=["map_x", "map_y"]).copy()
     plot_df["Título"] = plot_df["title"].fillna("—").str.slice(0, 90)
+
+    available = {
+        label: column
+        for label, column in MAP_COLOR_OPTIONS.items()
+        if column in plot_df.columns and plot_df[column].notna().any()
+    }
+    choice = st.radio(
+        "Colorir por",
+        options=list(available),
+        horizontal=True,
+        key="semantic_map_color",
+        help="A posição dos pontos não muda — só o que a cor está contando sobre eles.",
+    )
+    color_column = available[choice]
+    continuous = choice in ("Relevância", "Ano")
+
+    hover_data = {"map_x": False, "map_y": False, "year": True, "relevance_score": ":.3f"}
+    if "relevance_margin" in plot_df.columns:
+        hover_data["relevance_margin"] = ":.3f"
     fig = px.scatter(
         plot_df,
         x="map_x",
         y="map_y",
-        color="theme_label",
+        color=color_column,
         hover_name="Título",
-        hover_data={"map_x": False, "map_y": False, "year": True, "relevance_score": ":.3f"},
+        hover_data=hover_data,
         title="Cada ponto é um artigo; a proximidade reflete similaridade de conteúdo",
-        labels={"theme_label": "Tema"},
+        labels={
+            "theme_label": "Tema",
+            "relevance_margin": "Margem",
+            "relevance_score": "Relevância",
+            "year": "Ano",
+            "source": "Base",
+        },
+        # A continuous dimension gets a scale, a categorical one the shared
+        # palette -- `color_discrete_sequence` is simply ignored by px on a
+        # numeric column, so passing both would silently do nothing.
+        color_continuous_scale=None if not continuous else ["#e34948", "#eda100", "#1baf7a"],
         color_discrete_sequence=CATEGORICAL_PALETTE,
         opacity=0.75,
     )
     fig.update_traces(marker=dict(size=6))
+    _add_theme_labels(fig, plot_df)
     # As coordenadas do t-SNE não têm unidade nem orientação interpretável --
     # só a vizinhança entre pontos significa algo --, por isso os valores dos
     # ticks ficam ocultos. Os eixos continuam nomeados: sem nome nenhum, o
@@ -161,9 +282,36 @@ def _semantic_map(scored: pd.DataFrame) -> None:
     render_chart(
         fig,
         height=620,
-        caption="Projeção t-SNE dos embeddings dos resumos. **Os eixos não têm significado** — só a "
-        "proximidade entre pontos importa. A ilha do tema de logística é a contaminação da busca "
-        "ficando visível.",
+        caption="Projeção t-SNE dos embeddings dos resumos, calculada no **mesmo espaço** em que os "
+        "temas são descobertos — é isso que faz a cor de um ponto concordar com onde ele caiu. "
+        "**Os eixos não têm significado**: só a proximidade entre pontos importa. Medido, o corpus é "
+        "um contínuo denso com **uma** ilha destacada (a de logística, a contaminação da busca ficando "
+        "visível); os temas são recortes desse contínuo, não grupos naturalmente separados.",
+    )
+
+
+def _add_theme_labels(fig, plot_df: pd.DataFrame) -> None:
+    """Write each theme's name on the map, at the median of its points.
+
+    Median, not mean: one article dragged to the far side of the projection
+    would otherwise pull the label off its own cloud. This is a text *trace*
+    (data), not `add_annotation` -- the dashboard's chart contract keeps
+    annotations out of charts because they used to be guide lines covering the
+    data, which these labels aren't.
+    """
+    if "theme_label" not in plot_df.columns:
+        return
+    centroids = plot_df.groupby("theme_label")[["map_x", "map_y"]].median().reset_index()
+    fig.add_trace(
+        go.Scatter(
+            x=centroids["map_x"],
+            y=centroids["map_y"],
+            mode="text",
+            text=centroids["theme_label"],
+            textfont=dict(size=11, color=theme_tokens()["chart_annotation"]),
+            hoverinfo="skip",
+            showlegend=False,
+        )
     )
 
 

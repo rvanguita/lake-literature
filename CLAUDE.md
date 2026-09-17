@@ -119,9 +119,18 @@ rerun, and a module imported for its top-level side effects would only render on
 
 "Distribution system planning" is ambiguous — it also matches logistics/supply-chain papers, and roughly a
 tenth of the corpus is facility-location/cold-chain work plus book front matter ingested as articles.
-Relevance screening is a core SLR step, so every article gets a cosine score against a topic anchor
-(`transform/semantics.py::ANCHOR_TEXT`) and the dashboard lets a reviewer act on it. Nothing is auto-deleted,
-and articles with no score are never filtered out by `loaders.filter_articles`.
+Relevance screening is a core SLR step, so every article is scored against **two** anchors in
+`transform/semantics.py` — `ANCHOR_TEXT` (the review's topic) and `OFF_ANCHOR_TEXT` (the logistics reading of
+the same query) — and the screening signal is the margin between them, whose **zero is the threshold**:
+"closer to logistics than to the review's topic". A single anchor separates the two groups well (ROC AUC 0.96)
+but their score distributions overlap, so the percentile cut this used to take also discarded in-scope work;
+the margin reaches AUC 0.99 with no overlap. Nothing is auto-deleted, and articles with no score are never
+filtered out by `loaders.filter_articles`.
+
+The themes on the same page come from KMeans (`N_THEMES = 8`) and the map from t-SNE, both over the **same**
+PCA(50) space (`transform/semantics.py::reduced_space`) — sharing it is what keeps a point's color and its
+position on the map in agreement. `k` is human-chosen, not optimized: silhouette is flat across k=6..14 on
+this corpus and HDBSCAN finds only two groups (one continuum plus the logistics island).
 
 ## Data corpus (`data/`, gitignored)
 

@@ -46,14 +46,22 @@ def create_databases() -> None:
 # after a table already exists needs this. Every entry must be nullable and
 # purely additive -- this runs unattended on every pipeline start, so it must
 # never be able to drop or rewrite existing data.
-_ARTICLE_COLUMNS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "reference_count": ("INT NULL", ("bronze", "silver", "gold")),
-    "sources": ("JSON NULL", ("gold",)),
-    # IEEE-only enrichment, see transform/bronze_articles.py.
-    "countries": ("JSON NULL", ("bronze", "silver", "gold")),
-    "online_date": ("DATE NULL", ("bronze", "silver", "gold")),
-    "document_type": ("VARCHAR(128) NULL", ("bronze", "silver", "gold")),
-    "license": ("VARCHAR(64) NULL", ("bronze", "silver", "gold")),
+#
+# Keyed by table: `lit_articles` was the only one that ever grew a column until
+# the semantic stage started scoring against a second anchor, and a migration
+# map that can only reach one table silently isn't a migration map.
+_ADDITIVE_COLUMNS: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
+    "lit_articles": {
+        "reference_count": ("INT NULL", ("bronze", "silver", "gold")),
+        "sources": ("JSON NULL", ("gold",)),
+        # IEEE-only enrichment, see transform/bronze_articles.py.
+        "countries": ("JSON NULL", ("bronze", "silver", "gold")),
+        "online_date": ("DATE NULL", ("bronze", "silver", "gold")),
+        "document_type": ("VARCHAR(128) NULL", ("bronze", "silver", "gold")),
+        "license": ("VARCHAR(64) NULL", ("bronze", "silver", "gold")),
+    },
+    # Cosine to the logistics anchor, see transform/semantics.py.
+    "lit_semantics": {"offtopic_score": ("FLOAT NULL", ("gold",))},
 }
 
 
@@ -63,20 +71,21 @@ def create_tables() -> None:
         module.Base.metadata.create_all(engine)
 
         inspector = inspect(engine)
-        if not inspector.has_table("lit_articles"):
-            continue
-        existing = {c["name"] for c in inspector.get_columns("lit_articles")}
-        missing = [
-            (name, ddl)
-            for name, (ddl, layers) in _ARTICLE_COLUMNS.items()
-            if layer in layers and name not in existing
-        ]
-        if not missing:
-            continue
-        with engine.connect() as conn:
-            for name, ddl in missing:
-                conn.execute(text(f"ALTER TABLE `lit_articles` ADD COLUMN `{name}` {ddl}"))
-            conn.commit()
+        for table, columns in _ADDITIVE_COLUMNS.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            missing = [
+                (name, ddl)
+                for name, (ddl, layers) in columns.items()
+                if layer in layers and name not in existing
+            ]
+            if not missing:
+                continue
+            with engine.connect() as conn:
+                for name, ddl in missing:
+                    conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{name}` {ddl}"))
+                conn.commit()
 
 
 def bootstrap() -> None:

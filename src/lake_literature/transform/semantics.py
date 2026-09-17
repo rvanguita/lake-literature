@@ -10,7 +10,8 @@ system planning", which is ambiguous -- it matches electric power distribution
 out to be facility-location and cold-chain papers, plus book front matter
 ("Preface", "Index") ingested as if it were an article. Relevance screening is
 a core step of a systematic literature review, so instead of hiding that, every
-article gets a score and the dashboard lets a reviewer act on it.
+article is scored against *both* readings of the query and the dashboard lets a
+reviewer act on the margin between them.
 
 The functions below take plain numpy arrays so they can be tested without a
 database or the embedding model; `build_semantics` is the only part that does
@@ -42,10 +43,42 @@ ANCHOR_TEXT = (
     "quality in electrical energy distribution grids."
 )
 
+# The other meaning of the same search string. Scoring against both anchors and
+# keeping the *margin* is what turns screening from a ranking into a decision:
+# a single anchor separates the two groups well (ROC AUC 0.96) but their score
+# distributions still overlap -- on this corpus the 90th percentile of the
+# logistics group (0.705) sits above the 10th percentile of the genuine
+# distribution-planning papers (0.694), so any percentile cut throws away
+# in-scope work. The margin `relevance - offtopic` reaches AUC 0.99 with no
+# overlap (0.011 vs 0.060) and, unlike a percentile, has a meaningful zero:
+# "closer to logistics than to the review's topic".
+#
+# Measured against pseudo-labels taken from the corpus's own logistics cluster,
+# so it is indicative, not a hand-labelled gold standard.
+OFF_ANCHOR_TEXT = (
+    "Logistics and supply chain distribution: warehouse location, vehicle routing, inventory "
+    "management, freight transportation, facility location and cold chain distribution networks."
+)
+
 N_THEMES = 8
 DUPLICATE_THRESHOLD = 0.95
 THEME_LABEL_TERMS = 3
 RANDOM_SEED = 0
+
+# Clustering and the map both run on this PCA space (61% of the variance on
+# this corpus) instead of the raw 384 dimensions. Sharing it is the point: the
+# themes used to be found in 384-d while the map was built in 2-d from the same
+# vectors but independently, so a point's color had no obligation to agree with
+# where it landed -- 35% of a point's 15 nearest neighbours on the map carried a
+# different theme. Clustering the reduced space raises that agreement to ~70%,
+# and t-SNE over 50 dimensions is also markedly faster than over 384.
+PCA_COMPONENTS = 50
+TSNE_PERPLEXITY = 50
+
+# A label term must appear in at least this share of its theme's documents.
+# Without the floor, "distinctive" degenerates into "rare": the top terms came
+# out as one-off acronyms (`Nilm · Nice · Ndz`) that name nothing.
+LABEL_MIN_DOC_FREQ = 0.15
 
 
 def relevance_scores(matrix: np.ndarray, anchor: np.ndarray) -> np.ndarray:
@@ -61,45 +94,119 @@ def relevance_scores(matrix: np.ndarray, anchor: np.ndarray) -> np.ndarray:
     return (normalized @ unit_anchor).astype("float32")
 
 
+def reduced_space(matrix: np.ndarray, n_components: int = PCA_COMPONENTS) -> np.ndarray:
+    """L2-normalize `matrix` and project it onto its leading principal components.
+
+    The normalization is explicit rather than assumed: `fastembed` does return
+    unit vectors for this model (verified: norm 1.0000 +/- 0.00000), but every
+    distance below only means cosine distance *because* of that, and a future
+    model that doesn't normalize would otherwise silently change what the
+    clusters and the map are measuring.
+
+    PCA both denoises and speeds the projection up; `n_components` is capped by
+    the data so a handful of rows (a fresh corpus, a test) still works.
+    """
+    from sklearn.decomposition import PCA
+
+    if matrix.size == 0:
+        return matrix
+    normalized = matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+    components = min(n_components, *normalized.shape)
+    if components < 2:
+        return normalized.astype("float32")
+    projected = PCA(n_components=components, random_state=RANDOM_SEED).fit_transform(normalized)
+    return projected.astype("float32")
+
+
+def theme_labels_from_terms(
+    texts: list[str], labels: np.ndarray, n_terms: int = THEME_LABEL_TERMS
+) -> dict[int, str]:
+    """Name each theme after the terms it over-uses relative to the rest of the corpus.
+
+    Three rules, each one earned by a label that read badly without it:
+
+    - `max_df` drops the terms every theme shares (`distribution`, `power`,
+      `planning`), so they can't win a slot just by being everywhere;
+    - a term only competes if it appears in `LABEL_MIN_DOC_FREQ` of the theme's
+      documents, which is what keeps rare acronyms out of the label;
+    - a term that is a substring of one already picked is skipped, so a theme
+      doesn't come out as "energy - energy storage" saying one thing twice.
+
+    Purely lexical on purpose: it explains the cluster in the corpus's own
+    words, and it stays testable without the embedding model.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    labels = np.asarray(labels)
+    fallback = {int(t): f"Tema {int(t) + 1}" for t in np.unique(labels)}
+    # The floor has to scale with the corpus: 10 documents out of 1.8k is a
+    # real floor, out of 20 it empties the vocabulary.
+    min_df = int(np.clip(round(0.005 * len(texts)), 2, 10))
+    try:
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            ngram_range=(1, 2),
+            min_df=min_df,
+            max_df=0.5,
+            sublinear_tf=True,
+        )
+        tfidf = vectorizer.fit_transform(texts)
+    except ValueError:
+        # Too few/too short documents for a vocabulary -- fall back to numbers.
+        logger.debug("theme_labels_from_terms: TF-IDF vocabulary empty", exc_info=True)
+        return fallback
+
+    terms = np.array(vectorizer.get_feature_names_out())
+    corpus_mean = np.asarray(tfidf.mean(axis=0)).ravel()
+    present = (tfidf > 0).astype("float32")
+
+    theme_labels: dict[int, str] = {}
+    for theme in np.unique(labels):
+        members = labels == theme
+        member_mean = np.asarray(tfidf[members].mean(axis=0)).ravel()
+        doc_freq = np.asarray(present[members].mean(axis=0)).ravel()
+        distinctiveness = np.where(
+            doc_freq >= LABEL_MIN_DOC_FREQ, member_mean - corpus_mean, -np.inf
+        )
+
+        picked: list[str] = []
+        for index in np.argsort(distinctiveness)[::-1]:
+            if not np.isfinite(distinctiveness[index]):
+                break
+            term = str(terms[index])
+            if any(term in other or other in term for other in picked):
+                continue
+            picked.append(term)
+            if len(picked) == n_terms:
+                break
+        theme_labels[int(theme)] = " · ".join(p.title() for p in picked) or fallback[int(theme)]
+    return theme_labels
+
+
 def discover_themes(
     matrix: np.ndarray, texts: list[str], k: int = N_THEMES
 ) -> tuple[np.ndarray, dict[int, str]]:
     """Cluster `matrix` into `k` themes and name each from its distinctive terms.
 
-    Returns `(labels, {theme_id: label})`. `k` is a fixed, human-inspected
-    choice, not an optimized one: silhouette scores on same-domain text
-    embeddings are uninformative (~0.02 here) because the clusters genuinely
-    overlap, so the criterion is whether the labels read as real topics.
+    Returns `(labels, {theme_id: label})`. Pass the `reduced_space` matrix, not
+    the raw embeddings: the map is built from the same space, and that is what
+    keeps a theme's color and its position on the map in agreement.
 
-    Labels come from the terms a cluster over-uses *relative to the rest of the
-    corpus*, not its highest raw TF-IDF terms -- otherwise every cluster in a
-    distribution-planning corpus gets labelled "distribution, power, planning".
+    `k` is a fixed, human-inspected choice, and the measurements say it has to
+    be: silhouette is flat across k=6..14 (0.035-0.044 on this corpus) because
+    the themes genuinely overlap, and density clustering doesn't rescue it --
+    HDBSCAN over the map finds exactly two groups and calls 13% of the corpus
+    noise, which is the honest shape of the data (one continuum plus the
+    logistics island), not a usable set of themes. k=10 was tried and split off
+    a junk theme ("Problems - Constrained - Population"), so 8 stays; the
+    criterion is whether the labels read as real topics.
     """
     from sklearn.cluster import KMeans
-    from sklearn.feature_extraction.text import TfidfVectorizer
 
     n_samples = len(matrix)
     k = max(1, min(k, n_samples))
     labels = KMeans(n_clusters=k, n_init=10, random_state=RANDOM_SEED).fit_predict(matrix)
-
-    try:
-        vectorizer = TfidfVectorizer(
-            max_features=6000, stop_words="english", ngram_range=(1, 2), min_df=2
-        )
-        tfidf = vectorizer.fit_transform(texts)
-        terms = np.array(vectorizer.get_feature_names_out())
-        corpus_mean = np.asarray(tfidf.mean(axis=0)).ravel()
-    except ValueError:
-        # Too few/too short documents for a vocabulary -- fall back to numbers.
-        logger.debug("discover_themes: TF-IDF vocabulary empty", exc_info=True)
-        return labels, {int(t): f"Tema {int(t) + 1}" for t in np.unique(labels)}
-
-    theme_labels: dict[int, str] = {}
-    for theme in np.unique(labels):
-        member_mean = np.asarray(tfidf[labels == theme].mean(axis=0)).ravel()
-        distinctive = terms[np.argsort(member_mean - corpus_mean)[::-1][:THEME_LABEL_TERMS]]
-        theme_labels[int(theme)] = " · ".join(distinctive)
-    return labels, theme_labels
+    return labels, theme_labels_from_terms(texts, labels)
 
 
 def project_2d(matrix: np.ndarray) -> np.ndarray:
@@ -108,14 +215,21 @@ def project_2d(matrix: np.ndarray) -> np.ndarray:
     t-SNE preserves local neighbourhoods, which is what makes the off-topic
     group read as a visually separate island. Coordinates are only comparable
     within one run.
+
+    Expects the `reduced_space` matrix. Euclidean distance is left as the
+    metric because the vectors it came from are unit-length, so euclidean and
+    cosine order neighbours identically -- paying for `metric="cosine"` would
+    buy nothing. `TSNE_PERPLEXITY` is higher than Plotly's habit of 30: on this
+    corpus it measured better (neighbourhood agreement 0.698 vs 0.686), which
+    fits a corpus that is one dense continuum rather than distinct blobs.
     """
     from sklearn.manifold import TSNE
 
     n_samples = len(matrix)
     if n_samples < 3:
         return np.zeros((n_samples, 2), dtype="float32")
-    # t-SNE requires perplexity < n_samples; 30 is its default.
-    perplexity = min(30, max(2, (n_samples - 1) // 3))
+    # t-SNE requires perplexity < n_samples.
+    perplexity = min(TSNE_PERPLEXITY, max(2, (n_samples - 1) // 3))
     projection = TSNE(
         n_components=2, perplexity=perplexity, init="pca", random_state=RANDOM_SEED
     ).fit_transform(matrix)
@@ -145,16 +259,21 @@ def near_duplicate_pairs(
     return sorted(pairs, key=lambda p: p[2], reverse=True)
 
 
-def _embed_anchor(text: str) -> np.ndarray:
+def _embed_anchors(texts: list[str]) -> np.ndarray:
     # Imported lazily, like transform/embeddings.py does, so stages that never
-    # touch the model don't pay fastembed's import cost.
+    # touch the model don't pay fastembed's import cost. Both anchors go
+    # through one model load -- it is the expensive part, not the two vectors.
     from fastembed import TextEmbedding
 
     model = TextEmbedding(model_name=EMBED_MODEL_NAME)
-    return np.array(next(model.embed([text])), dtype="float32")
+    return np.array(list(model.embed(texts)), dtype="float32")
 
 
-def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> dict:
+def build_semantics(
+    gold_session: Session,
+    anchor_text: str = ANCHOR_TEXT,
+    off_anchor_text: str = OFF_ANCHOR_TEXT,
+) -> dict:
     """Rebuild `lit_semantics` and `lit_duplicate_pairs` from the abstract chunks.
 
     One abstract chunk per article is the unit here: it exists for every gold
@@ -202,9 +321,16 @@ def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> di
     matrix = np.array([r[1] for r in rows], dtype="float32")
     texts = [r[2] or "" for r in rows]
 
-    scores = relevance_scores(matrix, _embed_anchor(anchor_text))
-    labels, theme_labels = discover_themes(matrix, texts)
-    coords = project_2d(matrix)
+    anchors = _embed_anchors([anchor_text, off_anchor_text])
+    scores = relevance_scores(matrix, anchors[0])
+    offtopic = relevance_scores(matrix, anchors[1])
+
+    # One space for both: the themes are found in it and the map is drawn from
+    # it, so a point's color and its position can't disagree the way they did
+    # when the clusters lived in 384 dimensions and the map in 2.
+    reduced = reduced_space(matrix)
+    labels, theme_labels = discover_themes(reduced, texts)
+    coords = project_2d(reduced)
     pairs = near_duplicate_pairs(matrix, dois)
 
     gold_session.execute(delete(Semantics))
@@ -214,6 +340,7 @@ def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> di
             Semantics(
                 doi=doi,
                 relevance_score=float(scores[i]),
+                offtopic_score=float(offtopic[i]),
                 theme_id=int(labels[i]),
                 theme_label=theme_labels[int(labels[i])],
                 map_x=float(coords[i][0]),
@@ -232,4 +359,8 @@ def build_semantics(gold_session: Session, anchor_text: str = ANCHOR_TEXT) -> di
         "duplicate_pairs": len(pairs),
         "embedding_coverage": round(coverage, 4),
         "median_relevance": round(float(np.median(scores)), 4),
+        # The screening signal: positive means closer to the review's topic
+        # than to the logistics reading of the same search string.
+        "median_margin": round(float(np.median(scores - offtopic)), 4),
+        "offtopic_articles": int((scores - offtopic < 0).sum()),
     }
