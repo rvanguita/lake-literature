@@ -7,7 +7,10 @@ and keeps the venue/categorical palettes from drifting apart over time.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
+import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 
 logger = logging.getLogger(__name__)
@@ -411,25 +414,37 @@ def hex_to_rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def polish_figure_layout(fig, height: int | None = None) -> None:
-    """Apply unified light/dark styling, with the legend sitting below the title.
+@lru_cache(maxsize=4)
+def _figure_template(theme_type: str, has_title: bool):
+    """The shared chart styling as a Plotly template, built once per
+    (theme, has_title) combination.
 
-    Two things used to be wrong here: with `yanchor="bottom"`, a larger `y`
-    means the legend's bottom edge sits higher up, so pushing `y` up to avoid
-    a long title actually put the legend *above* the title instead of below
-    it. And the "no title" case reused the same tight offset for every
-    chart, leaving barely any gap above the plot. `yanchor="top"` makes `y`
-    the legend's own top edge (it extends downward from there), so a lower
-    `y` than the title's `y` reliably reads as "legend below title" -- and
-    both cases now get more breathing room from the top of the canvas.
+    Passing this nested styling to `update_layout` on every figure cost ~9ms
+    each in Plotly's per-property validation -- with ~20 charts per page that
+    was the single largest cost in rendering a page. A template is validated
+    once here and afterwards applied by reference (~0.8ms). It layers on top
+    of Plotly's default template so the built-in colorway/colorscales the
+    Express charts rely on survive.
+
+    The legend offset depends on whether the figure has a title, which is why
+    that's part of the cache key rather than applied per figure.
+    With `yanchor="bottom"`, a larger `y` means the legend's bottom edge sits
+    higher up, so pushing `y` up to avoid a long title actually put the legend
+    *above* the title instead of below it. `yanchor="top"` makes `y` the
+    legend's own top edge (it extends downward from there), so a lower `y`
+    than the title's `y` reliably reads as "legend below title".
     """
-    t = _tokens()
-    has_title = bool(fig.layout.title and fig.layout.title.text)
-    top_margin = 105 if has_title else 55
-    legend_y = 0.86 if has_title else 1.06
-
-    fig.update_layout(
-        margin=dict(l=40, r=40, t=top_margin, b=40),
+    t = _LIGHT_TOKENS if theme_type == "light" else _DARK_TOKENS
+    axis = dict(
+        showgrid=True,
+        gridcolor=t["grid"],
+        zeroline=False,
+        linecolor=t["axis_line"],
+        tickfont=dict(color=t["chart_tick"]),
+        automargin=True,
+        title_font=dict(color=t["chart_text"]),
+    )
+    layout = dict(
         font=dict(
             family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
             size=12,
@@ -437,37 +452,50 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
         ),
         paper_bgcolor=t["chart_bg"],
         plot_bgcolor=t["chart_bg"],
-        xaxis=dict(
-            showgrid=True,
-            gridcolor=t["grid"],
-            zeroline=False,
-            linecolor=t["axis_line"],
-            tickfont=dict(color=t["chart_tick"]),
-            automargin=True,
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor=t["grid"],
-            zeroline=False,
-            linecolor=t["axis_line"],
-            tickfont=dict(color=t["chart_tick"]),
-            automargin=True,
-        ),
+        xaxis=axis,
+        yaxis=axis,
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=legend_y,
+            y=0.86 if has_title else 1.06,
             xanchor="left",
             x=0,
             font=dict(color=t["chart_text"]),
             bgcolor=t["legend_bg"],
             bordercolor=t["legend_border"],
         ),
+        annotationdefaults=dict(font=dict(weight="bold", color=t["chart_annotation"])),
     )
     if has_title:
-        fig.update_layout(title=dict(y=0.98, yanchor="top", x=0, xanchor="left"))
-    fig.update_xaxes(title_font=dict(color=t["chart_text"]))
-    fig.update_yaxes(title_font=dict(color=t["chart_text"]))
+        layout["title"] = dict(y=0.98, yanchor="top", x=0, xanchor="left")
+    base = pio.templates[pio.templates.default or "plotly"]
+    return go.layout.Template(base).update(layout=layout)
+
+
+def polish_figure_layout(fig, height: int | None = None) -> None:
+    """Apply the unified light/dark chart styling to `fig`, in place."""
+    has_title = bool(fig.layout.title and fig.layout.title.text)
+    if not has_title:
+        # `charts.py`'s builders always pass `title=title` to `update_layout`,
+        # even when the caller didn't supply one -- that explicit `None`
+        # still serializes `layout.title` as `{}` (Plotly's layout objects
+        # have schema defaults for every sub-field) rather than omitting the
+        # key. Streamlit's "streamlit" chart theme reads `title.text`
+        # whenever the key is present and renders the resulting `undefined`
+        # as literal text, so drop the key entirely when there's no real
+        # title to show.
+        fig.layout.pop("title", None)
+
+    # Margin stays out of the template: Plotly Express sets `margin.t` on the
+    # figure itself, and a figure-level value wins over a template default,
+    # so a templated margin would silently lose to px's own.
+    fig.update_layout(
+        template=_figure_template(_active_theme_type(), has_title),
+        margin=dict(l=40, r=40, t=105 if has_title else 55, b=40),
+    )
+    # Annotations already on the figure don't pick up the template's
+    # `annotationdefaults`, so they still need an explicit pass.
+    t = _tokens()
     fig.update_annotations(font=dict(weight="bold", color=t["chart_annotation"]))
     try:
         fig.update_traces(textfont=dict(weight="bold", color=t["chart_annotation"]))

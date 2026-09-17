@@ -6,6 +6,7 @@ Usage:
     uv run lake-literature --stage silver
     uv run lake-literature --stage gold
     uv run lake-literature --stage embed
+    uv run lake-literature --stage semantic
     uv run lake-literature --stage all       # default
 """
 
@@ -23,9 +24,10 @@ from lake_literature.ingest.raw_pdfs import load_pdf_inventory
 from lake_literature.transform.bronze_articles import build_bronze_articles
 from lake_literature.transform.embeddings import build_embeddings
 from lake_literature.transform.gold_articles import build_gold_articles
+from lake_literature.transform.semantics import build_semantics
 from lake_literature.transform.silver_articles import build_silver_articles
 
-STAGES = ("raw", "bronze", "silver", "gold", "embed", "all")
+STAGES = ("raw", "bronze", "silver", "gold", "embed", "semantic", "all")
 
 
 def run_raw() -> dict:
@@ -96,6 +98,16 @@ def run_embed() -> dict:
         gold_session.close()
 
 
+def run_semantic() -> dict:
+    gold_session = get_session("gold")
+    try:
+        stats = build_semantics(gold_session)
+        print(f"[semantic] {stats}")
+        return stats
+    finally:
+        gold_session.close()
+
+
 def run_all() -> dict:
     bootstrap()
     return {
@@ -104,6 +116,7 @@ def run_all() -> dict:
         "silver": run_silver(),
         "gold": run_gold(),
         "embed": run_embed(),
+        "semantic": run_semantic(),
     }
 
 
@@ -119,6 +132,8 @@ def run(stage: str) -> None:
         run_gold()
     if stage in ("embed", "all"):
         run_embed()
+    if stage in ("semantic", "all"):
+        run_semantic()
 
 
 def main(argv: list[str] | None = None) -> None:

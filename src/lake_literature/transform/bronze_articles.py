@@ -13,6 +13,7 @@ DOI never appears in the CSV -- see CLAUDE.md "counts don't line up".
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 from sqlalchemy import select
@@ -51,6 +52,53 @@ def _split_keywords(text: str | None, sep: str) -> list[str]:
     if not text:
         return []
     return [k.strip() for k in text.split(sep) if k.strip()]
+
+
+# US/Canada affiliations end "<city>, <state>, USA", everyone else ends
+# "<city>, <country>". Taking the last comma-segment therefore lands on the
+# country either way. These are the values that segment produces but that
+# aren't countries.
+_NON_COUNTRY_TOKENS = {"na", "n/a", "", "-"}
+
+
+def _split_countries(affiliations: str | None) -> list[str]:
+    """Distinct countries from the IEEE CSV's `Author Affiliations`.
+
+    The field is `;`-separated, one entry per author, and each entry ends with
+    the country -- so one article yields one country per author, deduplicated
+    here because what matters downstream is which countries took part, not how
+    many co-authors each contributed. IEEE-only: Elsevier's .bib carries no
+    affiliation at all, so any analysis built on this covers ~17% of the corpus
+    and must say so.
+    """
+    if not isinstance(affiliations, str) or not affiliations.strip():
+        return []
+    countries: list[str] = []
+    for affiliation in affiliations.split(";"):
+        segments = [s.strip() for s in affiliation.split(",") if s.strip()]
+        if not segments:
+            continue
+        country = segments[-1]
+        if country.casefold() in _NON_COUNTRY_TOKENS:
+            continue
+        if country not in countries:
+            countries.append(country)
+    return countries
+
+
+def _parse_online_date(value) -> dt.date | None:
+    """Parse the IEEE CSV's `Online Date` (e.g. `24 Jun 2024`).
+
+    This is the only field in the corpus that survives with finer-than-yearly
+    resolution -- bronze otherwise keeps just `year` -- so it's what any
+    monthly trend has to be built on.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return dt.datetime.strptime(value.strip(), "%d %b %Y").date()
+    except ValueError:
+        return None
 
 
 def _to_int(value) -> int | None:
@@ -131,6 +179,10 @@ def _build_ieee_records(raw_session: Session, bronze_session: Session) -> int:
             keywords=keywords,
             citation_count=_to_int(f.get("Article Citation Count")),
             reference_count=_to_int(f.get("Reference Count")),
+            countries=_split_countries(f.get("Author Affiliations")),
+            online_date=_parse_online_date(f.get("Online Date")),
+            document_type=f.get("Document Identifier") or None,
+            license=f.get("License") or None,
             raw_csv_id=row.id,
             raw_bib_id=matching_bib.id if matching_bib else None,
         )

@@ -26,6 +26,7 @@ from lake_literature.dashboard.pages import (
     quality,
     researchers,
     search_config,
+    semantics,
     topics,
 )
 from lake_literature.dashboard.theme import apply_dashboard_theme, render_theme_toggle
@@ -36,6 +37,7 @@ PAGES = [
     (topics.render, "Tópicos e Periódicos", "🏷️", "topics"),
     (highlights.render, "Destaques e Impacto", "🏆", "highlights"),
     (researchers.render, "Pesquisadores", "👥", "researchers"),
+    (semantics.render, "Semântica & Relevância", "🧭", "semantics"),
     (forecasting.render, "Tendências & Previsão", "🔮", "forecast"),
     (pipeline_layers.render, "Camadas & Pipeline", "🏗️", "pipeline-layers"),
     (quality.render, "Qualidade e RAG", "🧩", "quality"),

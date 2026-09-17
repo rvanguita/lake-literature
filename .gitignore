@@ -28,6 +28,8 @@ data/ieee/
 data/sciencedirect.zip
 data/enrichment_cache.json
 data/classificações_publicadas_todas_as_areas_avaliacao*.xlsx
+# Subconjunto ENGENHARIAS IV do xlsx acima, em parquet (dashboard/qualis.py)
+data/.qualis_*.parquet
 
 # Airflow local runtime (host runs, outside Docker's named volumes)
 airflow/airflow.db

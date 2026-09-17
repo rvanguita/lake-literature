@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Date, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -40,6 +40,13 @@ class Article(Base):
     keywords: Mapped[list] = mapped_column(JSON, default=list)  # list[str]
     citation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reference_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # IEEE-only: the Elsevier .bib carries none of these. Always report them
+    # against the IEEE subset (~17% of the corpus), never the whole thing.
+    countries: Mapped[list] = mapped_column(JSON, default=list)  # from Author Affiliations
+    online_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)  # monthly resolution
+    document_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    license: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     raw_bib_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_csv_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

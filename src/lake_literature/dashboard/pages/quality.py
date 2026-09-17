@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from lake_literature.dashboard import actions, loaders
+from lake_literature.dashboard.charts import topn_hbar
 from lake_literature.dashboard.components import (
     hero_banner,
     metric_row,
@@ -50,30 +51,183 @@ def render() -> None:
         f"<b>{len(chunks_df):,}</b> chunks prontos para recuperação.",
     )
 
-    tab_metadata, tab_fulltext, tab_chunks, tab_search = st.tabs(
-        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔍 Busca"]
+    tab_metadata, tab_fulltext, tab_chunks, tab_ieee, tab_search = st.tabs(
+        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔷 Extras IEEE", "🔍 Busca"]
     )
 
     with tab_metadata:
-        _metadata_richness(articles_df)
+        sub_abs, sub_kw = st.tabs(["📝 Resumo", "🏷️ Palavras-chave"])
+        _metadata_richness(articles_df, sub_abs, sub_kw)
+
+    with tab_ieee:
+        _ieee_extras(articles_df)
 
     with tab_fulltext:
         _fulltext_coverage(articles_df, chunks_df)
 
     with tab_chunks:
-        _chunks(chunks_df)
-        st.divider()
-        _embedding_readiness(chunks_df)
+        sub_type, sub_len, sub_per_article, sub_embed = st.tabs(
+            [
+                "🥧 Tipos de Chunk",
+                "📏 Tamanho dos Chunks",
+                "📚 Chunks por Artigo",
+                "🧠 Cobertura de Embeddings",
+            ]
+        )
+        if _chunks_intro(chunks_df):
+            with sub_type:
+                _chunk_type_pie(chunks_df)
+            with sub_len:
+                _chunk_length_histogram(chunks_df)
+            with sub_per_article:
+                _chunks_per_article(chunks_df)
+        with sub_embed:
+            _embedding_readiness(chunks_df)
 
     with tab_search:
         _search_demo(chunks_df)
+
+
+def _ieee_extras(articles_df: pd.DataFrame) -> None:
+    """Fields only the IEEE CSV export carries: country, online date, type, licence.
+
+    Every number here is reported against the IEEE subset, never the whole
+    corpus: Elsevier's .bib has no affiliation, no online date and no licence
+    field at all, so a percentage over 1.831 articles would understate these by
+    a factor of six and read as "missing data" rather than "not applicable".
+    """
+    st.subheader("🔷 Campos exclusivos da base IEEE")
+
+    if "countries" not in articles_df.columns:
+        st.info(
+            "Colunas de enriquecimento IEEE ainda não existem nesta camada — rode "
+            "`uv run lake-literature --stage bronze` (e silver/gold) para populá-las."
+        )
+        return
+
+    ieee_only = articles_df[
+        articles_df["source"].eq("ieee")
+        if "source" in articles_df.columns
+        else articles_df.index.notna()
+    ]
+    n_ieee = len(ieee_only)
+    if n_ieee == 0:
+        st.info("Nenhum artigo da base IEEE no filtro atual.")
+        return
+
+    hero_banner(
+        "Cobertura parcial, por natureza da fonte",
+        f"Estes campos vêm do export CSV do IEEE Xplore, que a ScienceDirect não fornece. "
+        f"A base é de <b>{n_ieee:,} artigos IEEE</b> — cerca de "
+        f"{n_ieee / max(len(articles_df), 1):.0%} do corpus filtrado. "
+        "Todos os percentuais abaixo usam esse denominador, não o corpus inteiro.",
+    )
+
+    countries = ieee_only["countries"].apply(lambda c: c if isinstance(c, list) else [])
+    with_country = int(countries.apply(bool).sum())
+    metric_row(
+        [
+            ("🔷 Artigos IEEE", f"{n_ieee:,}", None),
+            ("🌍 Com país identificado", f"{with_country:,}", f"{with_country / n_ieee:.0%}"),
+            (
+                "🗓️ Com data online",
+                f"{int(ieee_only['online_date'].notna().sum()):,}"
+                if "online_date" in ieee_only.columns
+                else "N/D",
+                None,
+            ),
+        ]
+    )
+
+    sub_pais, sub_mes, sub_tipo = st.tabs(
+        ["🌍 Países", "🗓️ Granularidade Mensal", "📰 Tipo & Licença"]
+    )
+
+    with sub_pais:
+        exploded = countries.explode().dropna()
+        if exploded.empty:
+            st.info("Nenhuma afiliação com país identificável.")
+        else:
+            top = exploded.value_counts().head(15)
+            fig = topn_hbar(
+                top,
+                title="Top 15 países por participação em artigos (base IEEE)",
+                x_title="Artigos com ao menos um autor no país",
+            )
+            fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+            render_chart(
+                fig,
+                caption="Um artigo conta uma vez por país presente entre suas afiliações, então "
+                "colaborações internacionais aparecem em mais de um país e a soma das barras "
+                f"excede os {n_ieee:,} artigos. Extraído do último segmento de cada afiliação "
+                "(`…, cidade, País`), o que também acerta o formato dos EUA (`…, UT, USA`).",
+            )
+
+    with sub_mes:
+        if "online_date" not in ieee_only.columns or ieee_only["online_date"].isna().all():
+            st.info("Coluna 'online_date' indisponível.")
+        else:
+            dated = ieee_only.dropna(subset=["online_date"]).copy()
+            dated["mes"] = pd.to_datetime(dated["online_date"]).dt.to_period("M").dt.to_timestamp()
+            by_month = dated.groupby("mes").size().reset_index(name="artigos")
+            fig = px.bar(
+                by_month,
+                x="mes",
+                y="artigos",
+                title="Publicações por mês de disponibilização online (base IEEE)",
+                labels={"mes": "Mês", "artigos": "Artigos"},
+                color_discrete_sequence=[SOURCE_COLORS["ieee"]],
+            )
+            fig.update_layout(xaxis_title="Mês de publicação online", yaxis_title="Artigos")
+            render_chart(
+                fig,
+                caption="`Online Date` é o **único** campo do corpus com resolução mais fina que o "
+                "ano — em todo o resto do dashboard só o ano sobrevive. Serve para ver sazonalidade "
+                "e a defasagem entre publicação online e edição formal.",
+            )
+
+    with sub_tipo:
+        col_tipo, col_lic = st.columns(2)
+        with col_tipo:
+            if "document_type" in ieee_only.columns and ieee_only["document_type"].notna().any():
+                counts = ieee_only["document_type"].dropna().value_counts()
+                fig = px.pie(
+                    names=counts.index,
+                    values=counts.to_numpy(),
+                    title="Tipo de veículo (Document Identifier)",
+                    color_discrete_sequence=CATEGORICAL_PALETTE,
+                )
+                render_chart(
+                    fig,
+                    caption="Revela que o IEEE Xplore hospeda também periódicos de outras "
+                    "editoras (CSEE, SGEPRI), além de revistas e capítulos de livro.",
+                )
+            else:
+                st.info("Coluna 'document_type' indisponível.")
+        with col_lic:
+            if "license" in ieee_only.columns and ieee_only["license"].notna().any():
+                counts = ieee_only["license"].dropna().value_counts()
+                oa = int(counts.filter(like="CC").sum())
+                fig = px.pie(
+                    names=counts.index,
+                    values=counts.to_numpy(),
+                    title="Licença de publicação",
+                    color_discrete_sequence=CATEGORICAL_PALETTE,
+                )
+                render_chart(
+                    fig,
+                    caption=f"{oa} artigos sob licença Creative Commons (acesso aberto) entre os "
+                    f"{int(counts.sum())} com licença declarada.",
+                )
+            else:
+                st.info("Coluna 'license' indisponível.")
 
 
 def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
     st.subheader("🧠 Prontidão de embeddings")
     total = len(chunks_df)
     with_embedding = (
-        int(chunks_df["embedding"].notna().sum()) if "embedding" in chunks_df.columns else 0
+        int(chunks_df["has_embedding"].sum()) if "has_embedding" in chunks_df.columns else 0
     )
     pending = total - with_embedding
     pct = (with_embedding / total * 100) if total else 0.0
@@ -199,8 +353,7 @@ def _fulltext_coverage(articles_df: pd.DataFrame, chunks_df: pd.DataFrame) -> No
     )
 
 
-def _metadata_richness(articles_df: pd.DataFrame) -> None:
-    st.subheader("🗂️ Riqueza de metadados por base")
+def _metadata_richness(articles_df: pd.DataFrame, sub_abs, sub_kw) -> None:
     if not require_columns(articles_df, ["source"]):
         return
 
@@ -220,9 +373,15 @@ def _metadata_richness(articles_df: pd.DataFrame) -> None:
         .agg(mean_abstract=("abstract_len", "mean"), mean_keywords=("n_keywords", "mean"))
         .reset_index()
     )
+    caption = (
+        f"⚠️ A aparente vantagem do IEEE na contagem de palavras-chave decorre da consolidação no estágio "
+        "bronze de `Author Keywords` e `IEEE Terms` (vocabulário controlado) em um único campo sem "
+        f"deduplicação, enquanto a Elsevier fornece apenas as palavras-chave indicadas pelos autores. "
+        f"Hoje {n_no_keywords:,} artigos estão sem nenhuma keyword e {n_no_abstract:,} sem resumo."
+    )
 
-    col_abs, col_kw = st.columns(2)
-    with col_abs:
+    with sub_abs:
+        st.subheader("🗂️ Riqueza de metadados por base")
         fig = px.bar(
             agg,
             x="source",
@@ -234,8 +393,10 @@ def _metadata_richness(articles_df: pd.DataFrame) -> None:
         )
         fig.update_traces(hovertemplate="<b>%{x}</b>: %{y:,.0f} caracteres<extra></extra>")
         fig.update_layout(xaxis_title="", yaxis_title="Caracteres", showlegend=False)
-        render_chart(fig, height=CHART_HEIGHT)
-    with col_kw:
+        render_chart(fig, height=CHART_HEIGHT, caption=caption)
+
+    with sub_kw:
+        st.subheader("🗂️ Riqueza de metadados por base")
         fig = px.bar(
             agg,
             x="source",
@@ -247,109 +408,23 @@ def _metadata_richness(articles_df: pd.DataFrame) -> None:
         )
         fig.update_traces(hovertemplate="<b>%{x}</b>: %{y:.1f} termos<extra></extra>")
         fig.update_layout(xaxis_title="", yaxis_title="Palavras-chave", showlegend=False)
-        render_chart(fig, height=CHART_HEIGHT)
-
-    st.caption(
-        f"⚠️ A aparente vantagem do IEEE na contagem de palavras-chave decorre da consolidação no estágio "
-        "bronze de `Author Keywords` e `IEEE Terms` (vocabulário controlado) em um único campo sem "
-        f"deduplicação, enquanto a Elsevier fornece apenas as palavras-chave indicadas pelos autores. "
-        f"Hoje {n_no_keywords:,} artigos estão sem nenhuma keyword e {n_no_abstract:,} sem resumo."
-    )
+        render_chart(fig, height=CHART_HEIGHT, caption=caption)
 
 
-def _chunks(chunks_df: pd.DataFrame) -> None:
+def _chunks_intro(chunks_df: pd.DataFrame) -> bool:
+    """Guard + shared summary metric row. Returns True if there's data to show."""
     st.subheader("🧩 Fragmentos (chunks) preparados para embedding")
     if chunks_df.empty:
         st.info(
             "`lit_gold.chunks` ainda não foi populada — execute a etapa `gold` do pipeline "
             "(botão na barra lateral ou `uv run lake-literature --stage gold`)."
         )
-        return
+        return False
 
     if not require_columns(
         chunks_df, ["chunk_type"], "A tabela de chunks não possui o campo `chunk_type`."
     ):
-        return
-    by_type = chunks_df["chunk_type"].value_counts().rename_axis("type").reset_index(name="count")
-    by_type["label_pt"] = by_type["type"].map(
-        {"abstract": "Resumo (Abstract)", "fulltext": "Texto Completo (Fulltext)"}
-    )
-
-    col_type, col_len = st.columns(2)
-    with col_type:
-        fig = px.pie(
-            by_type, names="label_pt", values="count", title="Proporção de chunks por tipo"
-        )
-        fig.update_traces(
-            texttemplate="<b>%{label}</b><br><b>%{value:,} (%{percent})</b>",
-            hovertemplate="<b>%{label}</b>: %{value:,} chunks (%{percent})<extra></extra>",
-        )
-        render_chart(
-            fig,
-            height=CHART_HEIGHT,
-            caption="`abstract` = 1 fragmento por artigo (título + palavras-chave + resumo); `fulltext` = "
-            "fragmentos extraídos diretamente dos PDFs dos artigos disponíveis.",
-        )
-    with col_len:
-        if require_columns(chunks_df, ["char_len"]):
-            length_df = chunks_df.dropna(subset=["char_len"])
-            # In overlay mode the last category painted sits on top -- draw
-            # the smaller-volume chunk type last so it isn't hidden behind
-            # the larger one wherever their bins overlap.
-            type_order = (
-                length_df["chunk_type"].value_counts().sort_values(ascending=False).index.tolist()
-                if "chunk_type" in length_df.columns
-                else None
-            )
-            fig = px.histogram(
-                length_df,
-                x="char_len",
-                color="chunk_type" if "chunk_type" in length_df.columns else None,
-                barmode="overlay",
-                opacity=0.75,
-                nbins=40,
-                category_orders={"chunk_type": type_order} if type_order else None,
-                title="Tamanho dos chunks (caracteres) por tipo",
-                labels={"char_len": "Comprimento em caracteres", "chunk_type": "Tipo"},
-            )
-            fig.update_traces(
-                hovertemplate="Tamanho: ~%{x} caracteres<br>Chunks: %{y:,}<extra></extra>"
-            )
-            fig.update_layout(
-                xaxis_title=f"Caracteres por fragmento (teto de chunking: {CHUNK_MAX_CHARS:,})",
-                yaxis_title="Quantidade de chunks",
-            )
-            render_chart(
-                fig,
-                height=CHART_HEIGHT,
-                caption=f"O eixo mostra até o teto de {CHUNK_MAX_CHARS:,} caracteres usado ao dividir o "
-                "texto completo (`gold_articles.CHUNK_MAX_CHARS`); fragmentos excessivamente curtos perdem "
-                "contexto semântico.",
-            )
-
-    if "doi" in chunks_df.columns:
-        chunks_per_article = chunks_df.groupby("doi").size()
-        fulltext_dois = (
-            chunks_df.loc[chunks_df["chunk_type"] == "fulltext", "doi"].unique()
-            if "chunk_type" in chunks_df.columns
-            else []
-        )
-        fulltext_chunks_per_article = chunks_per_article.reindex(fulltext_dois)
-        if not fulltext_chunks_per_article.empty:
-            st.markdown("**Chunks por artigo (apenas os que têm texto completo)**")
-            fig = px.histogram(
-                fulltext_chunks_per_article.rename("n_chunks").reset_index(),
-                x="n_chunks",
-                nbins=20,
-                labels={"n_chunks": "Chunks por artigo (abstract + fulltext)"},
-            )
-            fig.update_traces(marker_color=CATEGORICAL_PALETTE[1])
-            render_chart(
-                fig,
-                height=CHART_HEIGHT,
-                caption="Dimensiona o custo de gerar embeddings: artigos com PDFs longos geram mais chunks "
-                "de texto completo.",
-            )
+        return False
 
     metric_row(
         [
@@ -360,6 +435,94 @@ def _chunks(chunks_df: pd.DataFrame) -> None:
                 None,
             ),
         ]
+    )
+    return True
+
+
+def _chunk_type_pie(chunks_df: pd.DataFrame) -> None:
+    by_type = chunks_df["chunk_type"].value_counts().rename_axis("type").reset_index(name="count")
+    by_type["label_pt"] = by_type["type"].map(
+        {"abstract": "Resumo (Abstract)", "fulltext": "Texto Completo (Fulltext)"}
+    )
+    fig = px.pie(by_type, names="label_pt", values="count", title="Proporção de chunks por tipo")
+    fig.update_traces(
+        texttemplate="<b>%{label}</b><br><b>%{value:,} (%{percent})</b>",
+        hovertemplate="<b>%{label}</b>: %{value:,} chunks (%{percent})<extra></extra>",
+    )
+    render_chart(
+        fig,
+        height=CHART_HEIGHT,
+        caption="`abstract` = 1 fragmento por artigo (título + palavras-chave + resumo); `fulltext` = "
+        "fragmentos extraídos diretamente dos PDFs dos artigos disponíveis.",
+    )
+
+
+def _chunk_length_histogram(chunks_df: pd.DataFrame) -> None:
+    if not require_columns(chunks_df, ["char_len"]):
+        return
+    length_df = chunks_df.dropna(subset=["char_len"])
+    # In overlay mode the last category painted sits on top -- draw
+    # the smaller-volume chunk type last so it isn't hidden behind
+    # the larger one wherever their bins overlap.
+    type_order = (
+        length_df["chunk_type"].value_counts().sort_values(ascending=False).index.tolist()
+        if "chunk_type" in length_df.columns
+        else None
+    )
+    fig = px.histogram(
+        length_df,
+        x="char_len",
+        color="chunk_type" if "chunk_type" in length_df.columns else None,
+        barmode="overlay",
+        opacity=0.75,
+        nbins=40,
+        category_orders={"chunk_type": type_order} if type_order else None,
+        title="Tamanho dos chunks (caracteres) por tipo",
+        labels={"char_len": "Comprimento em caracteres", "chunk_type": "Tipo"},
+    )
+    fig.update_traces(hovertemplate="Tamanho: ~%{x} caracteres<br>Chunks: %{y:,}<extra></extra>")
+    fig.update_layout(
+        xaxis_title=f"Caracteres por fragmento (teto de chunking: {CHUNK_MAX_CHARS:,})",
+        yaxis_title="Quantidade de chunks",
+    )
+    render_chart(
+        fig,
+        height=CHART_HEIGHT,
+        caption=f"O eixo mostra até o teto de {CHUNK_MAX_CHARS:,} caracteres usado ao dividir o "
+        "texto completo (`gold_articles.CHUNK_MAX_CHARS`); fragmentos excessivamente curtos perdem "
+        "contexto semântico.",
+    )
+
+
+def _chunks_per_article(chunks_df: pd.DataFrame) -> None:
+    if "doi" not in chunks_df.columns:
+        st.info("Coluna 'doi' não disponível nesta camada.")
+        return
+
+    chunks_per_article = chunks_df.groupby("doi").size()
+    fulltext_dois = (
+        chunks_df.loc[chunks_df["chunk_type"] == "fulltext", "doi"].unique()
+        if "chunk_type" in chunks_df.columns
+        else []
+    )
+    fulltext_chunks_per_article = chunks_per_article.reindex(fulltext_dois)
+    if fulltext_chunks_per_article.empty:
+        st.info("Nenhum artigo com chunks de texto completo nesta camada/filtro.")
+        return
+
+    st.markdown("**Chunks por artigo (apenas os que têm texto completo)**")
+    fig = px.histogram(
+        fulltext_chunks_per_article.rename("n_chunks").reset_index(),
+        x="n_chunks",
+        nbins=20,
+        labels={"n_chunks": "Chunks por artigo (abstract + fulltext)"},
+    )
+    fig.update_traces(marker_color=CATEGORICAL_PALETTE[1])
+    render_chart(
+        fig,
+        height=CHART_HEIGHT,
+        caption="Dimensiona o custo de gerar embeddings: artigos com PDFs longos geram mais chunks "
+        "de texto completo.",
     )
 
 
@@ -392,7 +555,7 @@ def _render_result_card(
 
 def _search_demo(chunks_df: pd.DataFrame) -> None:
     st.subheader("🔍 Busca nos chunks")
-    has_embeddings = "embedding" in chunks_df.columns and chunks_df["embedding"].notna().any()
+    has_embeddings = "has_embedding" in chunks_df.columns and bool(chunks_df["has_embedding"].any())
 
     if has_embeddings:
         st.caption(
@@ -407,9 +570,8 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
             "pipeline). Serve para mostrar, na prática, o formato dos trechos que um RAG real usaria como "
             "contexto de resposta."
         )
-    if not require_columns(
-        chunks_df, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."
-    ):
+    if chunks_df.empty or "doi" not in chunks_df.columns:
+        st.info("Nenhum chunk disponível nesta camada/filtro.")
         return
 
     query = st.text_input(
@@ -419,16 +581,30 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
     if not query:
         return
 
+    # `chunks_df` is the lightweight, filter-scoped frame (no `text`/
+    # `embedding` -- see `data.py::load_chunks`); the full columns are only
+    # loaded here, lazily, once a query is actually submitted, then scoped to
+    # the same filtered DOI set.
+    search_df = loaders.chunk_search_data()
+    if search_df.empty or "doi" not in search_df.columns:
+        st.info("Nenhum chunk disponível para busca nesta camada.")
+        return
+    scoped = search_df[search_df["doi"].isin(chunks_df["doi"])]
+    if not require_columns(
+        scoped, ["text"], "Nenhum chunk com texto disponível nesta camada/filtro."
+    ):
+        return
+
     if has_embeddings:
-        matches = semantic_search(query, chunks_df, top_k=SEARCH_DEMO_MAX_RESULTS)
+        matches = semantic_search(query, scoped, top_k=SEARCH_DEMO_MAX_RESULTS)
         st.caption(
-            f"Top {len(matches):,} chunks mais similares à consulta (de {len(chunks_df):,} disponíveis)."
+            f"Top {len(matches):,} chunks mais similares à consulta (de {len(scoped):,} disponíveis)."
         )
     else:
-        mask = chunks_df["text"].str.contains(query, case=False, na=False, regex=False)
+        mask = scoped["text"].str.contains(query, case=False, na=False, regex=False)
         n_total_matches = int(mask.sum())
-        matches = chunks_df.loc[mask].head(SEARCH_DEMO_MAX_RESULTS)
-        st.caption(f"{n_total_matches:,} de {len(chunks_df):,} chunks contêm o termo buscado.")
+        matches = scoped.loc[mask].head(SEARCH_DEMO_MAX_RESULTS)
+        st.caption(f"{n_total_matches:,} de {len(scoped):,} chunks contêm o termo buscado.")
 
     if matches.empty:
         return

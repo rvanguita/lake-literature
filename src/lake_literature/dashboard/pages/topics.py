@@ -10,14 +10,12 @@ import streamlit as st
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
     cumulative_by_category,
-    cumulative_by_source,
     explode_keywords,
     source_counts_by,
     valid_years,
 )
 from lake_literature.dashboard.charts import (
     source_bars,
-    source_lines,
     source_topn_hbar,
     stacked_area,
     topn_hbar,
@@ -56,34 +54,87 @@ def render() -> None:
 
     articles_df = loaders.require_articles()
 
-    col_venues, col_keywords = st.columns(2)
-    with col_venues:
-        _top_venues(articles_df)
-    with col_keywords:
-        _top_keywords(articles_df)
+    kw_lists = None
+    all_keywords: list[str] = []
+    if "keywords" in articles_df.columns:
+        kw_lists = articles_df["keywords"].apply(
+            lambda kws: sorted({str(k).strip().lower() for k in kws if str(k).strip()})
+        )
+        all_keywords = sorted({k for kws in kw_lists for k in kws})
 
-    st.divider()
-    _capes_qualis_section(articles_df)
-
-    if not require_columns(articles_df, ["keywords"]):
-        return
-
-    kw_lists = articles_df["keywords"].apply(
-        lambda kws: sorted({str(k).strip().lower() for k in kws if str(k).strip()})
+    tab_venues, tab_keywords, tab_explorer, tab_trends = st.tabs(
+        ["📚 Periódicos", "🏷️ Palavras-Chave", "🔎 Explorador", "📈 Evolução Temporal"]
     )
-    all_keywords = sorted({k for kws in kw_lists for k in kws})
-    if not all_keywords:
-        st.info("Nenhuma palavra-chave identificada nesta camada.")
-        return
 
-    st.divider()
-    _keyword_stats(kw_lists, all_keywords)
+    with tab_venues:
+        (
+            sub_ranking,
+            sub_table,
+            sub_totals,
+            sub_cumulative,
+            sub_a1_a3_combined,
+        ) = st.tabs(
+            [
+                "🏆 Ranking",
+                "📋 Tabela CAPES/Qualis",
+                "📊 Publicações por Classificação",
+                "📈 Acumulado por Classificação",
+                "🎖️ A1-A3 — Acumulado",
+            ]
+        )
+        with sub_ranking:
+            _top_venues(articles_df)
 
-    st.divider()
-    _keyword_explorer(articles_df, kw_lists, all_keywords)
+        if require_columns(articles_df, ["venue"]) and articles_df["venue"].notna().any():
+            match_df, with_estrato, totals_by_estrato, estrato_order = _qualis_match_data(
+                articles_df
+            )
+            with sub_table:
+                _qualis_table(articles_df, match_df, with_estrato[with_estrato["estrato"] == "A1"])
+            with sub_totals:
+                _qualis_totals_chart(totals_by_estrato, estrato_order)
+            with sub_cumulative:
+                _qualis_cumulative_chart(with_estrato, estrato_order)
+            with sub_a1_a3_combined:
+                _qualis_a1_a3_combined(with_estrato)
 
-    st.divider()
-    _keyword_trends(articles_df)
+    with tab_keywords:
+        sub_top, sub_stats = st.tabs(["🏷️ Top 20 Palavras-Chave", "📊 Estatísticas do Vocabulário"])
+        with sub_top:
+            _top_keywords(articles_df)
+        with sub_stats:
+            if all_keywords:
+                _keyword_stats(kw_lists, all_keywords)
+            else:
+                st.info("Nenhuma palavra-chave identificada nesta camada.")
+
+    with tab_explorer:
+        if all_keywords:
+            _keyword_explorer(articles_df, kw_lists, all_keywords)
+        else:
+            st.info("Nenhuma palavra-chave identificada nesta camada.")
+
+    with tab_trends:
+        if not all_keywords:
+            st.info("Nenhuma palavra-chave identificada nesta camada.")
+        else:
+            kw_year = _prepare_keyword_trend_data(articles_df)
+            if kw_year is None:
+                st.info("Dados insuficientes para analisar tendências temporais.")
+            else:
+                sub_share, sub_slope, sub_first = st.tabs(
+                    [
+                        "📈 Participação Anual",
+                        "🔀 Ascensão vs. Declínio",
+                        "🌱 Vocabulário Novo vs. Fundacional",
+                    ]
+                )
+                with sub_share:
+                    _topic_share_area(kw_year)
+                with sub_slope:
+                    _rising_falling(kw_year)
+                with sub_first:
+                    _first_appearance(kw_year)
 
 
 def _top_venues(articles_df: pd.DataFrame) -> None:
@@ -194,31 +245,16 @@ def _keyword_explorer(
     )
 
 
-def _keyword_trends(articles_df: pd.DataFrame) -> None:
-    st.subheader("📈 Evolução temporal dos tópicos")
-
+def _prepare_keyword_trend_data(articles_df: pd.DataFrame) -> pd.DataFrame | None:
+    """Shared prep for the three "Evolução Temporal" sub-tabs, or None if there's not enough data."""
     kw_year = explode_keywords(articles_df)
     if kw_year.empty or "year" not in kw_year.columns:
-        st.info("Dados insuficientes para analisar tendências temporais.")
-        return
+        return None
     kw_year["year"] = valid_years(kw_year, lo=TREND_MIN_YEAR, hi=2026)
     kw_year = kw_year.dropna(subset=["year"]).astype({"year": int})
     if len(kw_year) < 30:
-        st.info(
-            f"Dados insuficientes a partir de {TREND_MIN_YEAR} para analisar tendências temporais."
-        )
-        return
-
-    col_share, col_slope = st.columns(2)
-
-    with col_share:
-        _topic_share_area(kw_year)
-
-    with col_slope:
-        _rising_falling(kw_year)
-
-    st.divider()
-    _first_appearance(kw_year)
+        return None
+    return kw_year
 
 
 def _topic_share_area(kw_year: pd.DataFrame) -> None:
@@ -363,13 +399,22 @@ def _first_appearance(kw_year: pd.DataFrame) -> None:
     )
 
 
-def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
-    st.subheader("🎓 Classificação CAPES/Qualis")
-    if not require_columns(articles_df, ["venue"]) or not articles_df["venue"].notna().any():
-        return
+def _qualis_match_data(
+    articles_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, list[str]]:
+    """Shared computation for all "Periódicos" CAPES/Qualis sub-tabs.
 
-    venues = sorted(articles_df["venue"].dropna().unique())
-    match_df = loaders.venue_qualis_map(tuple(venues))
+    Returns `(match_df, with_estrato, totals_by_estrato, estrato_order)`; `with_estrato` is
+    `articles_df` with an added `estrato` column (each article's venue's CAPES/Qualis tier).
+    """
+    # Filter the full-corpus match table down to venues in the current filter
+    # scope, rather than calling `venue_qualis_map` with a filtered venues
+    # tuple directly -- that would re-trigger the rapidfuzz matching pass
+    # (and, transitively, the ~9s CAPES xlsx parse) on every global filter
+    # change, since the venues tuple is the cache key.
+    venues = set(articles_df["venue"].dropna().unique())
+    match_df = loaders.all_venue_qualis_map()
+    match_df = match_df[match_df["venue"].isin(venues)].reset_index(drop=True)
     match_df["estrato"] = match_df["estrato"].fillna(NOT_CLASSIFIED)
     # A raw None in a string column renders as literal "undefined" in Streamlit's
     # dataframe grid (pandas' Arrow-backed string dtype stores it as a genuine
@@ -387,9 +432,24 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
         columns=["_tier_rank"]
     )
 
+    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
+    with_estrato = articles_df.copy()
+    with_estrato["estrato"] = with_estrato["venue"].map(venue_to_estrato)
+    totals_by_estrato = with_estrato["estrato"].value_counts().reindex(ESTRATO_ORDER, fill_value=0)
+    totals_by_estrato = totals_by_estrato[
+        totals_by_estrato.index.isin(with_estrato["estrato"].unique())
+    ]
+    estrato_order = list(totals_by_estrato.index)
+
+    return match_df, with_estrato, totals_by_estrato, estrato_order
+
+
+def _qualis_table(
+    articles_df: pd.DataFrame, match_df: pd.DataFrame, a1_articles_df: pd.DataFrame
+) -> None:
+    st.subheader("🎓 Classificação CAPES/Qualis")
     n_classified = int((match_df["estrato"] != NOT_CLASSIFIED).sum())
     a1_venues = match_df.loc[match_df["estrato"] == "A1", "venue"]
-    a1_articles_df = articles_df[articles_df["venue"].isin(a1_venues)]
     pct_a1 = (len(a1_articles_df) / len(articles_df) * 100) if len(articles_df) else 0.0
 
     metric_row(
@@ -422,15 +482,9 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
         width="stretch",
     )
 
-    st.markdown("#### Total de publicações por classificação")
-    venue_to_estrato = dict(zip(match_df["venue"], match_df["estrato"], strict=True))
-    with_estrato = articles_df.copy()
-    with_estrato["estrato"] = with_estrato["venue"].map(venue_to_estrato)
-    totals_by_estrato = with_estrato["estrato"].value_counts().reindex(ESTRATO_ORDER, fill_value=0)
-    totals_by_estrato = totals_by_estrato[
-        totals_by_estrato.index.isin(with_estrato["estrato"].unique())
-    ]
-    estrato_order = list(totals_by_estrato.index)
+
+def _qualis_totals_chart(totals_by_estrato: pd.Series, estrato_order: list[str]) -> None:
+    st.subheader("Total de publicações por classificação")
     fig = px.bar(
         x=totals_by_estrato.index,
         y=totals_by_estrato.to_numpy(),
@@ -446,67 +500,129 @@ def _capes_qualis_section(articles_df: pd.DataFrame) -> None:
         f'("A1") para a pior, com "{NOT_CLASSIFIED}" ao final.',
     )
 
-    st.markdown("#### Acumulado por classificação")
+
+def _qualis_cumulative_chart(with_estrato: pd.DataFrame, estrato_order: list[str]) -> None:
+    st.subheader("Acumulado por classificação")
     cum_by_estrato = cumulative_by_category(with_estrato, "estrato", top_n=10)
     if cum_by_estrato.empty:
         st.info("Sem anos válidos para o acumulado por classificação.")
-    else:
-        fig = stacked_area(
-            cum_by_estrato,
-            x="year",
-            y="cumulative",
-            color="estrato",
-            color_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
-            category_orders={"estrato": estrato_order},
-            title="Artigos acumulados por classificação CAPES/Qualis",
-        )
-        fig.update_traces(
-            hovertemplate="Ano %{x}<br>%{data.name}: %{y:,.0f} artigos acumulados<extra></extra>"
-        )
-        fig.update_layout(xaxis_title="Ano de publicação", yaxis_title="Artigos acumulados")
-        render_chart(
-            fig,
-            caption="Composição acumulada do corpus por estrato CAPES/Qualis (área "
-            f"{QUALIS_AREA}). Periódicos sem classificação confiável ficam em "
-            f'"{NOT_CLASSIFIED}", não misturados a nenhum estrato real.',
-        )
-
-    if a1_articles_df.empty:
-        st.info("Nenhum artigo em periódico classificado A1 nesta camada/filtro.")
         return
 
-    st.markdown("#### Análise -- somente periódicos A1")
-    col_year, col_cum = st.columns(2)
-    with col_year:
-        years_df = a1_articles_df.copy()
+    fig = stacked_area(
+        cum_by_estrato,
+        x="year",
+        y="cumulative",
+        color="estrato",
+        color_map=venue_color_map(estrato_order, others_label=NOT_CLASSIFIED),
+        category_orders={"estrato": estrato_order},
+        title="Artigos acumulados por classificação CAPES/Qualis",
+    )
+    fig.update_traces(
+        hovertemplate="Ano %{x}<br>%{data.name}: %{y:,.0f} artigos acumulados<extra></extra>"
+    )
+    fig.update_layout(xaxis_title="Ano de publicação", yaxis_title="Artigos acumulados")
+    render_chart(
+        fig,
+        caption="Composição acumulada do corpus por estrato CAPES/Qualis (área "
+        f"{QUALIS_AREA}). Periódicos sem classificação confiável ficam em "
+        f'"{NOT_CLASSIFIED}", não misturados a nenhum estrato real.',
+    )
+
+
+def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
+    st.subheader("Periódicos A1-A3 — Acumulado")
+    combined_df = with_estrato[with_estrato["estrato"].isin(("A1", "A2", "A3"))]
+    if combined_df.empty:
+        st.info("Nenhum artigo em periódico classificado A1, A2 ou A3 nesta camada/filtro.")
+        return
+
+    tier_palette = venue_color_map(["A1", "A2", "A3"])
+
+    col_volume, col_ranking = st.columns(2)
+    with col_volume:
+        years_df = combined_df.copy()
         years_df["year"] = valid_years(years_df)
         years_df = years_df.dropna(subset=["year"]).astype({"year": int})
         by_year = source_counts_by(years_df, "year").sort_values("year")
         if by_year.empty:
             st.info("Sem anos válidos para este gráfico.")
         else:
-            fig = source_bars(by_year, "year", total_line=True)
+            fig = source_bars(
+                by_year,
+                "year",
+                total_line=True,
+                title="Volume Anual de Artigos em Periódicos A1-A3, por Base",
+            )
             fig.update_layout(
-                hovermode="x unified", xaxis_title="Ano de publicação", yaxis_title="Artigos"
+                hovermode="x unified",
+                xaxis_title="Ano de Publicação",
+                yaxis_title="Quantidade de Artigos",
             )
-            render_chart(fig, caption="Volume anual de artigos publicados em periódicos A1.")
-    with col_cum:
-        cum = cumulative_by_source(a1_articles_df)
-        if cum.empty:
-            st.info("Sem anos válidos para o acumulado.")
-        else:
-            fig = source_lines(
-                cum, "year", title="Acumulado em periódicos A1", y_title="Artigos acumulados"
-            )
-            fig.update_layout(xaxis_title="Ano de publicação")
             render_chart(
                 fig,
-                caption=f"Ao final do período, {int(cum['total'].iloc[-1]):,} artigos acumulados em "
-                "periódicos A1.",
+                caption="Volume anual de artigos publicados em periódicos A1, A2 ou A3, por base.",
             )
+    with col_ranking:
+        top_combined = (
+            source_counts_by(combined_df, "venue").sort_values("total", ascending=False).head(15)
+        )
+        fig = source_topn_hbar(
+            top_combined,
+            "venue",
+            title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Base",
+            x_title="Quantidade de Artigos",
+        )
+        render_chart(
+            fig,
+            caption="Periódicos mais publicados pelo corpus, somando os estratos A1, A2 e A3, "
+            "coloridos por base.",
+        )
 
-    top_a1 = (
-        source_counts_by(a1_articles_df, "venue").sort_values("total", ascending=False).head(15)
-    )
-    fig = source_topn_hbar(top_a1, "venue", x_title="Artigos")
-    render_chart(fig, caption="Periódicos A1 mais publicados pelo corpus.")
+    st.divider()
+    col_venue_tier, col_source_tier = st.columns(2)
+    with col_venue_tier:
+        top_venues = combined_df["venue"].value_counts().head(15)
+        venue_to_estrato = combined_df.drop_duplicates("venue").set_index("venue")["estrato"]
+        fig = topn_hbar(
+            top_venues,
+            color_by=venue_to_estrato,
+            palette=tier_palette,
+            title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Classificação CAPES/Qualis",
+            x_title="Quantidade de Artigos",
+        )
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+        render_chart(
+            fig,
+            caption="Os mesmos periódicos mais publicados do conjunto A1-A3, agora coloridos pela "
+            "própria classificação CAPES/Qualis — mostra qual categoria cada periódico do ranking "
+            "pertence.",
+        )
+    with col_source_tier:
+        if "source" not in combined_df.columns:
+            st.info("Coluna 'source' não disponível nesta camada.")
+        else:
+            by_source_tier = (
+                combined_df.groupby(["source", "estrato"]).size().reset_index(name="count")
+            )
+            fig = px.bar(
+                by_source_tier,
+                x="source",
+                y="count",
+                color="estrato",
+                category_orders={"estrato": ["A1", "A2", "A3"], "source": ["ieee", "elsevier"]},
+                color_discrete_map=tier_palette,
+                title="Distribuição de Artigos A1/A2/A3 por Base (IEEE vs. Elsevier)",
+                labels={"source": "Base", "count": "Artigos", "estrato": "Classificação"},
+            )
+            fig.update_traces(
+                hovertemplate="<b>%{data.name}</b><br>%{x}: %{y:,} artigos<extra></extra>"
+            )
+            fig.update_layout(
+                xaxis_title="Base (Editora)",
+                yaxis_title="Quantidade de Artigos",
+                legend_title_text="Classificação",
+            )
+            render_chart(
+                fig,
+                caption="Distribuição de artigos A1/A2/A3 por base (IEEE vs. Elsevier).",
+            )

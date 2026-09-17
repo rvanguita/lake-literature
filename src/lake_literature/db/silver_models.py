@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -37,6 +37,13 @@ class Article(Base):
     keywords: Mapped[list] = mapped_column(JSON, default=list)
     citation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reference_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # IEEE-only (see bronze_models) -- carried through so the dashboard can
+    # read them from the layer it actually renders.
+    countries: Mapped[list] = mapped_column(JSON, default=list)
+    online_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    document_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    license: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # quality flags
     has_abstract: Mapped[bool] = mapped_column(Boolean, default=False)

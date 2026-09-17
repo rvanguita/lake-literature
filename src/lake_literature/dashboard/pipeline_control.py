@@ -15,6 +15,7 @@ STAGE_LABELS = {
     "silver": "Silver (Limpo e Deduplicado)",
     "gold": "Gold (RAG)",
     "embed": "Embeddings (RAG)",
+    "semantic": "Semântica (Relevância e Temas)",
     "all": "Todas as Etapas",
 }
 
@@ -24,6 +25,7 @@ DAG_IDS = {
     "silver": "lake_literature_silver",
     "gold": "lake_literature_gold",
     "embed": "lake_literature_embed",
+    "semantic": "lake_literature_semantic",
     "all": "lake_literature_all",
 }
 
