@@ -180,7 +180,7 @@ def _correlation_heatmap(articles_df: pd.DataFrame) -> None:
         aspect="auto",
         labels={"color": "Correlação (Pearson)"},
     )
-    fig.update_layout(xaxis_title="", yaxis_title="")
+    fig.update_layout(xaxis_title="Métrica", yaxis_title="Métrica")
     # Plotly auto-thins tick labels that would collide, which silently drops
     # columns from a small 5x5 grid like this one -- force every label to
     # show since there's no crowding risk at this size.

@@ -155,6 +155,7 @@ def _top_venues(articles_df: pd.DataFrame) -> None:
         top_venues,
         color_by=modal_source,
         x_title="Quantidade de artigos",
+        y_title="Periódico / Evento",
     )
     fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos publicados<extra></extra>")
     render_chart(
@@ -189,7 +190,10 @@ def _top_keywords(articles_df: pd.DataFrame) -> None:
         grouped["elsevier"] = 0
 
     fig = topn_hbar(
-        grouped["total"], x_title="Quantidade de artigos", title="Top 20 palavras-chave"
+        grouped["total"],
+        x_title="Quantidade de artigos",
+        y_title="Palavra-chave",
+        title="Top 20 palavras-chave",
     )
     for trace in fig.data:
         breakdown = grouped.loc[list(trace.y), ["ieee", "elsevier"]].to_numpy()
@@ -326,7 +330,7 @@ def _rising_falling(kw_year: pd.DataFrame) -> None:
         title="Inclinação da participação anual (regressão linear)",
         labels={
             "slope": "Variação anual na participação (p.p./ano)",
-            "keyword": "",
+            "keyword": "Palavra-chave",
             "direction": "Tendência",
         },
     )
@@ -555,8 +559,8 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
             )
             fig.update_layout(
                 hovermode="x unified",
-                xaxis_title="Ano de Publicação",
-                yaxis_title="Quantidade de Artigos",
+                xaxis_title="Ano de publicação",
+                yaxis_title="Quantidade de artigos",
             )
             render_chart(
                 fig,
@@ -570,7 +574,8 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
             top_combined,
             "venue",
             title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Base",
-            x_title="Quantidade de Artigos",
+            x_title="Quantidade de artigos",
+            y_title="Periódico",
         )
         render_chart(
             fig,
@@ -588,7 +593,8 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
             color_by=venue_to_estrato,
             palette=tier_palette,
             title="Top 15 Periódicos A1-A3 por Quantidade de Artigos, por Classificação CAPES/Qualis",
-            x_title="Quantidade de Artigos",
+            x_title="Quantidade de artigos",
+            y_title="Periódico",
         )
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
         render_chart(
@@ -618,8 +624,8 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
                 hovertemplate="<b>%{data.name}</b><br>%{x}: %{y:,} artigos<extra></extra>"
             )
             fig.update_layout(
-                xaxis_title="Base (Editora)",
-                yaxis_title="Quantidade de Artigos",
+                xaxis_title="Base",
+                yaxis_title="Quantidade de artigos",
                 legend_title_text="Classificação",
             )
             render_chart(

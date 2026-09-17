@@ -374,7 +374,7 @@ def _cited_by_year(articles_df: pd.DataFrame) -> None:
     fig = source_lines(
         counts,
         "year",
-        y_title="Artigos com citações (citation_count > 0)",
+        y_title="Artigos com citações registradas",
         spline=True,
         fill=True,
     )
@@ -433,6 +433,7 @@ def _top_authors(articles_df: pd.DataFrame) -> None:
         top_authors,
         color_by=modal_source,
         x_title="Quantidade de artigos publicados",
+        y_title="Autor",
     )
     fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos publicados<extra></extra>")
     render_chart(
@@ -468,6 +469,7 @@ def _venue_impact(articles_df: pd.DataFrame) -> None:
         venue_impact["mean"],
         color_by=modal_source,
         x_title="Média de citações por artigo",
+        y_title="Periódico / Evento",
     )
     for trace in fig.data:
         trace.customdata = article_counts.reindex(trace.y).to_numpy().reshape(-1, 1)

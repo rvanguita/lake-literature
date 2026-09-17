@@ -313,6 +313,40 @@ def require_columns(df: pd.DataFrame, cols: list[str], message: str | None = Non
     return False
 
 
+# Trace types that have no cartesian axes at all, so "this axis has no title"
+# says nothing about them.
+_AXISLESS_TRACES = frozenset(
+    {"pie", "sankey", "indicator", "treemap", "sunburst", "funnelarea", "table"}
+)
+
+
+def _warn_unnamed_axes(fig) -> None:
+    """Log the charts whose visible axes carry no title.
+
+    Every chart in the dashboard goes through `render_chart`, which makes this
+    the one place that can audit all of them at once: run the app, click
+    through the pages, and the terminal lists whatever is still unlabelled.
+
+    It logs rather than calling `st.warning` on purpose -- a missing axis title
+    is a note for whoever is editing the page, not something to show a reviewer
+    reading the corpus. An axis explicitly hidden (`visible=False`) or stripped
+    of its ticks is exempt: that's how the t-SNE map and the co-authorship
+    network declare that their coordinates carry no meaning.
+    """
+    if all(trace.type in _AXISLESS_TRACES for trace in fig.data):
+        return
+    for name in ("xaxis", "yaxis"):
+        axis = fig.layout[name]
+        if axis.visible is False or axis.showticklabels is False:
+            continue
+        if axis.title and axis.title.text:
+            continue
+        chart_title = (fig.layout.title.text if fig.layout.title else None) or ",".join(
+            sorted({trace.type for trace in fig.data})
+        )
+        logger.warning("chart axis without a title: %s on %r", name, chart_title)
+
+
 def render_chart(fig, *, caption: str | None = None, height: int | None = None) -> None:
     """Apply the shared light/dark theme, render the figure, add its caption.
 
@@ -326,6 +360,7 @@ def render_chart(fig, *, caption: str | None = None, height: int | None = None) 
     -- so charts rendered near-black against the navy page background.
     """
     polish_figure_layout(fig, height=height)
+    _warn_unnamed_axes(fig)
     st.plotly_chart(fig, theme=None, width="stretch")
     if caption:
         st.caption(caption)

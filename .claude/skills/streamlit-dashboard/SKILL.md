@@ -52,6 +52,22 @@ rules exist to keep it from drifting back.
   — it applies `polish_figure_layout` and calls `st.plotly_chart` +
   `st.caption` in one place. Don't call `polish_figure_layout` /
   `st.plotly_chart` directly in a page.
+- **Name both axes.** Every chart with visible axes declares them — via the
+  builders' `x_title`/`y_title`, a px `labels={...}`, or `update_layout`.
+  Portuguese, sentence case, with the unit in parentheses only when it isn't
+  obvious from the name: `Ano de publicação`, `Quantidade de artigos`,
+  `Tamanho do chunk (caracteres)`, `Preenchimento (%)`. The category axis of a
+  top-N horizontal bar counts too (`Autor`, `Periódico`, `Palavra-chave`).
+  A `go.Figure` starts with *no* axis titles and a px figure falls back to the
+  raw column name (`count`, `stage`), so neither gives you a usable label for
+  free. `render_chart` logs a warning naming any chart that still has a bare
+  visible axis — run the app and read the terminal to audit the whole
+  dashboard at once.
+  The exception is an axis whose coordinates genuinely mean nothing: the t-SNE
+  semantic map and the co-authorship network hide theirs (`visible=False` /
+  `showticklabels=False`, which also silences the warning) and say why in a
+  comment plus the chart's caption. Hiding an axis is a decision to document,
+  not a default.
 - Guard missing columns with `components.require_columns(df, [...], message)`
   instead of a bespoke `st.info(...)`.
 - "Total" is a **real series/trace** (`TOTAL_COLOR`, `TOTAL_LABEL` from

@@ -153,6 +153,7 @@ def _ieee_extras(articles_df: pd.DataFrame) -> None:
                 top,
                 title="Top 15 países por participação em artigos (base IEEE)",
                 x_title="Artigos com ao menos um autor no país",
+                y_title="País",
             )
             fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
             render_chart(
@@ -178,7 +179,9 @@ def _ieee_extras(articles_df: pd.DataFrame) -> None:
                 labels={"mes": "Mês", "artigos": "Artigos"},
                 color_discrete_sequence=[SOURCE_COLORS["ieee"]],
             )
-            fig.update_layout(xaxis_title="Mês de publicação online", yaxis_title="Artigos")
+            fig.update_layout(
+                xaxis_title="Mês de publicação online", yaxis_title="Quantidade de artigos"
+            )
             render_chart(
                 fig,
                 caption="`Online Date` é o **único** campo do corpus com resolução mais fina que o "
@@ -320,7 +323,11 @@ def _fulltext_coverage(articles_df: pd.DataFrame, chunks_df: pd.DataFrame) -> No
     col_funnel, col_metrics = st.columns([2, 1])
     with col_funnel:
         fig = px.funnel(
-            funnel_df, x="count", y="stage", title="Funil de disponibilidade de texto completo"
+            funnel_df,
+            x="count",
+            y="stage",
+            title="Funil de disponibilidade de texto completo",
+            labels={"count": "Quantidade de artigos", "stage": "Etapa"},
         )
         fig.update_traces(
             marker_color=[CATEGORICAL_PALETTE[0], CATEGORICAL_PALETTE[3], CATEGORICAL_PALETTE[2]]
@@ -392,7 +399,9 @@ def _metadata_richness(articles_df: pd.DataFrame, sub_abs, sub_kw) -> None:
             labels={"source": "Base", "mean_abstract": "Caracteres"},
         )
         fig.update_traces(hovertemplate="<b>%{x}</b>: %{y:,.0f} caracteres<extra></extra>")
-        fig.update_layout(xaxis_title="", yaxis_title="Caracteres", showlegend=False)
+        fig.update_layout(
+            xaxis_title="Base", yaxis_title="Média de caracteres no resumo", showlegend=False
+        )
         render_chart(fig, height=CHART_HEIGHT, caption=caption)
 
     with sub_kw:
@@ -407,7 +416,11 @@ def _metadata_richness(articles_df: pd.DataFrame, sub_abs, sub_kw) -> None:
             labels={"source": "Base", "mean_keywords": "Palavras-chave"},
         )
         fig.update_traces(hovertemplate="<b>%{x}</b>: %{y:.1f} termos<extra></extra>")
-        fig.update_layout(xaxis_title="", yaxis_title="Palavras-chave", showlegend=False)
+        fig.update_layout(
+            xaxis_title="Base",
+            yaxis_title="Média de palavras-chave por artigo",
+            showlegend=False,
+        )
         render_chart(fig, height=CHART_HEIGHT, caption=caption)
 
 
@@ -518,6 +531,7 @@ def _chunks_per_article(chunks_df: pd.DataFrame) -> None:
         labels={"n_chunks": "Chunks por artigo (abstract + fulltext)"},
     )
     fig.update_traces(marker_color=CATEGORICAL_PALETTE[1])
+    fig.update_layout(yaxis_title="Quantidade de artigos")
     render_chart(
         fig,
         height=CHART_HEIGHT,

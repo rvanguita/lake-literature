@@ -245,10 +245,12 @@ def _top_authors(author_rows: pd.DataFrame) -> None:
                 by_source[src] = 0
         by_source["total"] = counts.reindex(top_index)
         by_source = by_source.reindex(top_index).reset_index()
-        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos")
+        fig = source_topn_hbar(
+            by_source, "author_display", x_title="Quantidade de artigos", y_title="Autor"
+        )
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     else:
-        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos")
+        fig = topn_hbar(counts.reindex(top_index), x_title="Quantidade de artigos", y_title="Autor")
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     render_chart(fig)
 
@@ -279,10 +281,14 @@ def _lead_authors_ranking(author_rows: pd.DataFrame) -> None:
                 by_source[src] = 0
         by_source["total"] = counts.reindex(top_index)
         by_source = by_source.reindex(top_index).reset_index()
-        fig = source_topn_hbar(by_source, "author_display", x_title="Artigos como 1º/2º autor")
+        fig = source_topn_hbar(
+            by_source, "author_display", x_title="Artigos como 1º/2º autor", y_title="Autor"
+        )
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     else:
-        fig = topn_hbar(counts.reindex(top_index), x_title="Artigos como 1º/2º autor")
+        fig = topn_hbar(
+            counts.reindex(top_index), x_title="Artigos como 1º/2º autor", y_title="Autor"
+        )
         fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
     render_chart(
         fig,
@@ -412,7 +418,7 @@ def _production_heatmap(author_rows: pd.DataFrame) -> None:
         pivot,
         aspect="auto",
         color_continuous_scale=["#0b1725", CATEGORICAL_PALETTE[0], CATEGORICAL_PALETTE[3]],
-        labels={"x": "Ano", "y": "", "color": "Artigos"},
+        labels={"x": "Ano de publicação", "y": "Autor", "color": "Artigos"},
     )
     fig.update_layout(height=max(420, 22 * len(pivot)))
     render_chart(
@@ -788,7 +794,12 @@ def _research_line_top_authors(selected: str, scoped_authors: pd.DataFrame) -> N
         .sort_values(ascending=False)
         .head(10)
     )
-    fig = topn_hbar(leaders, title=f"Autores mais produtivos em '{selected}'", x_title="Artigos")
+    fig = topn_hbar(
+        leaders,
+        title=f"Autores mais produtivos em '{selected}'",
+        x_title="Quantidade de artigos",
+        y_title="Autor",
+    )
     render_chart(fig)
 
 
@@ -910,7 +921,10 @@ def _author_keyword_working(
 def _author_keyword_overview(selected_author: str, working: pd.DataFrame) -> None:
     top_terms = working["keyword"].value_counts().head(10)
     fig = topn_hbar(
-        top_terms, title=f"Palavras-chave dominantes de {selected_author}", x_title="Menções"
+        top_terms,
+        title=f"Palavras-chave dominantes de {selected_author}",
+        x_title="Quantidade de menções",
+        y_title="Palavra-chave",
     )
     render_chart(fig)
 
@@ -949,6 +963,9 @@ def _author_keyword_shift(working: pd.DataFrame) -> None:
         marker_color=CATEGORICAL_PALETTE[2],
     )
     fig.update_layout(
-        barmode="group", title="Mudança de foco: início vs. fim da carreira no corpus"
+        barmode="group",
+        title="Mudança de foco: início vs. fim da carreira no corpus",
+        xaxis_title="Palavra-chave",
+        yaxis_title="Menções no período",
     )
     render_chart(fig)
