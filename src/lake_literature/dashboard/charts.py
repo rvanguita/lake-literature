@@ -4,6 +4,12 @@ Each function returns a styled `plotly.graph_objects.Figure` ready to be
 passed to `components.render_chart`. Centralizing these collapses the
 near-identical charts that used to be copy-pasted across pages (top-N bars,
 source-split bars/lines, stacked areas) into one implementation each.
+
+Every builder takes `x_title`/`y_title`: a `go.Figure` has no axis titles at
+all unless something sets them, and the pages that remembered to call
+`update_layout` afterwards drifted apart from the ones that didn't. Naming the
+axis where the figure is built is what keeps a chart from shipping with a bare
+axis -- `components.render_chart` logs a warning when one does.
 """
 
 from __future__ import annotations
@@ -24,13 +30,31 @@ from lake_literature.dashboard.theme import (
 )
 
 
+def _axis_titles(fig: go.Figure, x_title: str | None, y_title: str | None) -> None:
+    """Name the axes, leaving whatever is already there when a title is `None`.
+
+    Assigning `None` through `update_layout` would *clear* the axis title, which
+    on a Plotly Express figure means throwing away the label px derived from the
+    column name -- a raw `count`/`year` is ugly, but an empty axis is worse. So
+    only the titles the caller actually supplied are written.
+    """
+    updates = {}
+    if x_title is not None:
+        updates["xaxis_title"] = x_title
+    if y_title is not None:
+        updates["yaxis_title"] = y_title
+    if updates:
+        fig.update_layout(**updates)
+
+
 def source_bars(
     df: pd.DataFrame,
     x: str,
     *,
     title: str | None = None,
     total_line: bool = False,
-    labels: dict[str, str] | None = None,
+    x_title: str | None = None,
+    y_title: str | None = None,
 ) -> go.Figure:
     """Stacked IEEE/Elsevier bars, with an optional real Total line on top.
 
@@ -59,8 +83,7 @@ def source_bars(
                 marker=dict(size=5),
             )
         )
-    if labels:
-        fig.update_layout(xaxis_title=labels.get(x, x), yaxis_title=labels.get("value"))
+    _axis_titles(fig, x_title, y_title)
     polish_figure_layout(fig)
     return fig
 
@@ -70,6 +93,7 @@ def source_lines(
     x: str,
     *,
     title: str | None = None,
+    x_title: str | None = None,
     y_title: str | None = None,
     spline: bool = False,
     fill: bool = False,
@@ -113,7 +137,8 @@ def source_lines(
             marker=dict(size=6),
         )
     )
-    fig.update_layout(title=title, yaxis_title=y_title)
+    fig.update_layout(title=title)
+    _axis_titles(fig, x_title, y_title)
     polish_figure_layout(fig)
     return fig
 
@@ -125,6 +150,7 @@ def topn_hbar(
     palette: dict[str, str] | None = None,
     title: str | None = None,
     x_title: str | None = None,
+    y_title: str | None = None,
 ) -> go.Figure:
     """Top-N horizontal bar chart, optionally colored by a categorical series.
 
@@ -144,7 +170,7 @@ def topn_hbar(
             color="color",
             orientation="h",
             color_discrete_map=color_map,
-            labels={"value": x_title or "", "label": "", "color": "Base"},
+            labels={"value": x_title or "", "label": y_title or "", "color": "Base"},
         )
     else:
         fig = px.bar(
@@ -152,7 +178,7 @@ def topn_hbar(
             x="value",
             y="label",
             orientation="h",
-            labels={"value": x_title or "", "label": ""},
+            labels={"value": x_title or "", "label": y_title or ""},
             color_discrete_sequence=[CATEGORICAL_PALETTE[0]],
         )
     fig.update_layout(title=title, showlegend=color_by is not None)
@@ -166,6 +192,7 @@ def source_topn_hbar(
     *,
     title: str | None = None,
     x_title: str | None = None,
+    y_title: str | None = None,
 ) -> go.Figure:
     """Stacked IEEE/Elsevier horizontal bars, ranked by `total` (highest on top).
 
@@ -199,7 +226,7 @@ def source_topn_hbar(
         barmode="stack",
         title=title,
         xaxis_title=x_title,
-        yaxis_title="",
+        yaxis_title=y_title or "",
         showlegend=True,
     )
     polish_figure_layout(fig)
@@ -265,6 +292,8 @@ def stacked_area(
     color_map: dict[str, str] | None = None,
     category_orders: dict[str, list[str]] | None = None,
     title: str | None = None,
+    x_title: str | None = None,
+    y_title: str | None = None,
     groupnorm: str | None = None,
 ) -> go.Figure:
     """Stacked area chart, e.g. cumulative composition by venue/keyword.
@@ -285,5 +314,6 @@ def stacked_area(
     if color_map and OTHER_COLOR not in color_map.values():
         pass  # caller is responsible for including the "Others" bucket color
     fig.update_layout(title=title)
+    _axis_titles(fig, x_title, y_title)
     polish_figure_layout(fig)
     return fig

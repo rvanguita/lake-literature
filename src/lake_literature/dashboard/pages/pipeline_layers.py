@@ -194,7 +194,7 @@ def _retention_by_stage(funnel_df: pd.DataFrame) -> None:
             marker=dict(size=8),
         )
     )
-    fig.update_layout(xaxis_title="Camada", yaxis_title="Artigos")
+    fig.update_layout(xaxis_title="Camada", yaxis_title="Quantidade de artigos")
     render_chart(
         fig,
         caption="Bronze deduplica apenas dentro de cada fonte (chave `(source, source_id)`); silver e gold "
@@ -272,7 +272,7 @@ def _metadata_coverage_by_layer() -> None:
             CATEGORICAL_PALETTE[0],
             CATEGORICAL_PALETTE[2],
         ],
-        labels={"field": "", "coverage": "% preenchido", "layer": "Camada"},
+        labels={"field": "Campo", "coverage": "Preenchimento (%)", "layer": "Camada"},
     )
     fig.update_traces(hovertemplate="<b>%{x}</b><br>%{data.name}: %{y:.1f}%<extra></extra>")
     render_chart(

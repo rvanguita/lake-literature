@@ -366,8 +366,8 @@ def _keyword_growth_ranking() -> None:
             hovertemplate=f"<b>%{{y}}</b><br>Variação projetada até {final_forecast_year}: %{{x:+.1f}} artigos/ano<extra></extra>",
         )
         fig.update_layout(
-            xaxis_title=f"Variação (2025 → {final_forecast_year})",
-            yaxis_title="",
+            xaxis_title=f"Variação projetada (2025 → {final_forecast_year}, artigos/ano)",
+            yaxis_title="Palavra-chave",
         )
         render_chart(
             fig,

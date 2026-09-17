@@ -193,7 +193,7 @@ def _themes(scored: pd.DataFrame) -> None:
     )
     fig.update_layout(
         xaxis_title="Quantidade de artigos",
-        yaxis_title="",
+        yaxis_title="Tema",
         yaxis=dict(categoryorder="total ascending"),
     )
     render_chart(
