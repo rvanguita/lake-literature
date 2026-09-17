@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from lake_literature.dashboard import actions, loaders
+from lake_literature.dashboard.charts import topn_hbar
 from lake_literature.dashboard.components import (
     hero_banner,
     metric_row,
@@ -50,13 +51,16 @@ def render() -> None:
         f"<b>{len(chunks_df):,}</b> chunks prontos para recuperação.",
     )
 
-    tab_metadata, tab_fulltext, tab_chunks, tab_search = st.tabs(
-        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔍 Busca"]
+    tab_metadata, tab_fulltext, tab_chunks, tab_ieee, tab_search = st.tabs(
+        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔷 Extras IEEE", "🔍 Busca"]
     )
 
     with tab_metadata:
         sub_abs, sub_kw = st.tabs(["📝 Resumo", "🏷️ Palavras-chave"])
         _metadata_richness(articles_df, sub_abs, sub_kw)
+
+    with tab_ieee:
+        _ieee_extras(articles_df)
 
     with tab_fulltext:
         _fulltext_coverage(articles_df, chunks_df)
@@ -82,6 +86,141 @@ def render() -> None:
 
     with tab_search:
         _search_demo(chunks_df)
+
+
+def _ieee_extras(articles_df: pd.DataFrame) -> None:
+    """Fields only the IEEE CSV export carries: country, online date, type, licence.
+
+    Every number here is reported against the IEEE subset, never the whole
+    corpus: Elsevier's .bib has no affiliation, no online date and no licence
+    field at all, so a percentage over 1.831 articles would understate these by
+    a factor of six and read as "missing data" rather than "not applicable".
+    """
+    st.subheader("🔷 Campos exclusivos da base IEEE")
+
+    if "countries" not in articles_df.columns:
+        st.info(
+            "Colunas de enriquecimento IEEE ainda não existem nesta camada — rode "
+            "`uv run lake-literature --stage bronze` (e silver/gold) para populá-las."
+        )
+        return
+
+    ieee_only = articles_df[
+        articles_df["source"].eq("ieee")
+        if "source" in articles_df.columns
+        else articles_df.index.notna()
+    ]
+    n_ieee = len(ieee_only)
+    if n_ieee == 0:
+        st.info("Nenhum artigo da base IEEE no filtro atual.")
+        return
+
+    hero_banner(
+        "Cobertura parcial, por natureza da fonte",
+        f"Estes campos vêm do export CSV do IEEE Xplore, que a ScienceDirect não fornece. "
+        f"A base é de <b>{n_ieee:,} artigos IEEE</b> — cerca de "
+        f"{n_ieee / max(len(articles_df), 1):.0%} do corpus filtrado. "
+        "Todos os percentuais abaixo usam esse denominador, não o corpus inteiro.",
+    )
+
+    countries = ieee_only["countries"].apply(lambda c: c if isinstance(c, list) else [])
+    with_country = int(countries.apply(bool).sum())
+    metric_row(
+        [
+            ("🔷 Artigos IEEE", f"{n_ieee:,}", None),
+            ("🌍 Com país identificado", f"{with_country:,}", f"{with_country / n_ieee:.0%}"),
+            (
+                "🗓️ Com data online",
+                f"{int(ieee_only['online_date'].notna().sum()):,}"
+                if "online_date" in ieee_only.columns
+                else "N/D",
+                None,
+            ),
+        ]
+    )
+
+    sub_pais, sub_mes, sub_tipo = st.tabs(
+        ["🌍 Países", "🗓️ Granularidade Mensal", "📰 Tipo & Licença"]
+    )
+
+    with sub_pais:
+        exploded = countries.explode().dropna()
+        if exploded.empty:
+            st.info("Nenhuma afiliação com país identificável.")
+        else:
+            top = exploded.value_counts().head(15)
+            fig = topn_hbar(
+                top,
+                title="Top 15 países por participação em artigos (base IEEE)",
+                x_title="Artigos com ao menos um autor no país",
+            )
+            fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos<extra></extra>")
+            render_chart(
+                fig,
+                caption="Um artigo conta uma vez por país presente entre suas afiliações, então "
+                "colaborações internacionais aparecem em mais de um país e a soma das barras "
+                f"excede os {n_ieee:,} artigos. Extraído do último segmento de cada afiliação "
+                "(`…, cidade, País`), o que também acerta o formato dos EUA (`…, UT, USA`).",
+            )
+
+    with sub_mes:
+        if "online_date" not in ieee_only.columns or ieee_only["online_date"].isna().all():
+            st.info("Coluna 'online_date' indisponível.")
+        else:
+            dated = ieee_only.dropna(subset=["online_date"]).copy()
+            dated["mes"] = pd.to_datetime(dated["online_date"]).dt.to_period("M").dt.to_timestamp()
+            by_month = dated.groupby("mes").size().reset_index(name="artigos")
+            fig = px.bar(
+                by_month,
+                x="mes",
+                y="artigos",
+                title="Publicações por mês de disponibilização online (base IEEE)",
+                labels={"mes": "Mês", "artigos": "Artigos"},
+                color_discrete_sequence=[SOURCE_COLORS["ieee"]],
+            )
+            fig.update_layout(xaxis_title="Mês de publicação online", yaxis_title="Artigos")
+            render_chart(
+                fig,
+                caption="`Online Date` é o **único** campo do corpus com resolução mais fina que o "
+                "ano — em todo o resto do dashboard só o ano sobrevive. Serve para ver sazonalidade "
+                "e a defasagem entre publicação online e edição formal.",
+            )
+
+    with sub_tipo:
+        col_tipo, col_lic = st.columns(2)
+        with col_tipo:
+            if "document_type" in ieee_only.columns and ieee_only["document_type"].notna().any():
+                counts = ieee_only["document_type"].dropna().value_counts()
+                fig = px.pie(
+                    names=counts.index,
+                    values=counts.to_numpy(),
+                    title="Tipo de veículo (Document Identifier)",
+                    color_discrete_sequence=CATEGORICAL_PALETTE,
+                )
+                render_chart(
+                    fig,
+                    caption="Revela que o IEEE Xplore hospeda também periódicos de outras "
+                    "editoras (CSEE, SGEPRI), além de revistas e capítulos de livro.",
+                )
+            else:
+                st.info("Coluna 'document_type' indisponível.")
+        with col_lic:
+            if "license" in ieee_only.columns and ieee_only["license"].notna().any():
+                counts = ieee_only["license"].dropna().value_counts()
+                oa = int(counts.filter(like="CC").sum())
+                fig = px.pie(
+                    names=counts.index,
+                    values=counts.to_numpy(),
+                    title="Licença de publicação",
+                    color_discrete_sequence=CATEGORICAL_PALETTE,
+                )
+                render_chart(
+                    fig,
+                    caption=f"{oa} artigos sob licença Creative Commons (acesso aberto) entre os "
+                    f"{int(counts.sum())} com licença declarada.",
+                )
+            else:
+                st.info("Coluna 'license' indisponível.")
 
 
 def _embedding_readiness(chunks_df: pd.DataFrame) -> None:

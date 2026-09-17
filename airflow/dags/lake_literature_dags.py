@@ -4,7 +4,7 @@ Six DAGs, matching the six stage buttons in the Streamlit dashboard 1:1:
 `lake_literature_raw/bronze/silver/gold/embed` (one task each) and
 `lake_literature_all`, which groups the five chained stage tasks into a
 single `medallion_pipeline` TaskGroup so the Airflow UI graph reads as one
-connected flow -- raw -> bronze -> silver -> gold -> embed -- rather than a
+connected flow -- raw -> bronze -> silver -> gold -> embed -> semantic -- than a
 bare chain of same-level tasks. Every task just shells out to the same
 `uv run lake-literature --stage <stage>` entrypoint the CLI uses -- this file
 intentionally does not import `lake_literature` directly, so the pipeline
@@ -29,7 +29,7 @@ from airflow.sdk import DAG, TaskGroup
 PROJECT_DIR = "/opt/airflow/project"
 START_DATE = pendulum.datetime(2024, 1, 1, tz="UTC")
 
-STAGES = ("raw", "bronze", "silver", "gold", "embed")
+STAGES = ("raw", "bronze", "silver", "gold", "embed", "semantic")
 
 
 def _bash_command(stage: str) -> str:
@@ -58,7 +58,7 @@ for stage in STAGES:
 # for the "run all" button.
 with DAG(
     dag_id="lake_literature_all",
-    description="The lake-literature medallion pipeline as one flow: raw->bronze->silver->gold->embed.",
+    description="The lake-literature medallion pipeline as one flow: raw->bronze->silver->gold->embed->semantic.",
     schedule=None,
     start_date=START_DATE,
     catchup=False,

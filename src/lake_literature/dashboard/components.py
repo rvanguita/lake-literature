@@ -103,6 +103,44 @@ def _prepare_filter_state(articles_df: pd.DataFrame) -> tuple[list[int], list[st
     return year_options, sources, venues
 
 
+def _render_relevance_filter() -> None:
+    """Opt-in cut on the semantic relevance score.
+
+    Defaults to off: the score is an aid to screening, not ground truth, so it
+    must never silently change the numbers someone sees on first load. The
+    threshold is expressed as a percentile of this corpus, which is easier to
+    reason about than a raw cosine value.
+    """
+    signals = loaders.semantics()
+    if signals.empty or "relevance_score" not in signals.columns:
+        return
+
+    st.checkbox(
+        "Excluir artigos fora do escopo",
+        key="exclude_offtopic",
+        help=(
+            "Usa o score de relevância semântica (`--stage semantic`) para descartar artigos "
+            "distantes do tema da revisão — na prática, o grupo de logística/cadeia de "
+            "suprimentos que a busca por *distribution system planning* trouxe junto."
+        ),
+    )
+    if not st.session_state.get("exclude_offtopic"):
+        st.session_state.pop("global_min_relevance", None)
+        return
+
+    percentile = st.slider(
+        "Descartar abaixo do percentil",
+        min_value=1,
+        max_value=30,
+        value=10,
+        key="offtopic_percentile",
+        help="10 remove os 10% menos relevantes do corpus.",
+    )
+    threshold = float(signals["relevance_score"].quantile(percentile / 100))
+    st.session_state.global_min_relevance = threshold
+    st.caption(f"Corte: score ≥ {threshold:.3f}")
+
+
 def render_global_filters(articles_df: pd.DataFrame) -> None:
     """Render filters shared by every page and persist them in session state."""
     years, sources, venues = _prepare_filter_state(articles_df)
@@ -145,10 +183,14 @@ def render_global_filters(articles_df: pd.DataFrame) -> None:
     else:
         st.caption("Periódico / evento não disponível na camada ativa.")
 
+    _render_relevance_filter()
+
     if st.button("Limpar filtros", key="clear_global_filters", use_container_width=True):
         st.session_state.global_year_range = (years[0], years[-1]) if years else None
         st.session_state.global_sources = []
         st.session_state.global_venues = []
+        st.session_state.pop("global_min_relevance", None)
+        st.session_state.exclude_offtopic = False
         st.rerun()
 
     _, filtered = loaders.filtered_articles()
@@ -175,12 +217,12 @@ def render_sidebar() -> None:
         st.divider()
         st.subheader("⚙️ Executar pipeline (via Airflow)")
 
-        for stage in ("raw", "bronze", "silver", "gold", "embed"):
+        for stage in ("raw", "bronze", "silver", "gold", "embed", "semantic"):
             if st.button(f"▶ Executar {STAGE_LABELS[stage]}", key=f"run_{stage}"):
                 with st.spinner(f"Disparando {STAGE_LABELS[stage]} no Airflow..."):
                     _trigger(stage)
 
-        if st.button("⏩ Executar tudo (raw→bronze→silver→gold→embed)", key="run_all"):
+        if st.button("⏩ Executar tudo (raw→bronze→silver→gold→embed→semantic)", key="run_all"):
             with st.spinner("Disparando o pipeline completo no Airflow..."):
                 _trigger("all")
 
