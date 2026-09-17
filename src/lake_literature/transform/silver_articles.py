@@ -58,6 +58,12 @@ def _merge_group(doi: str, group: list[BronzeArticle]) -> dict:
         "reference_count": next(
             (a.reference_count for a in group if a.reference_count is not None), None
         ),
+        # Only the IEEE side of a merged group carries these, so take the
+        # first record that actually has them rather than the primary's.
+        "countries": next((a.countries for a in group if a.countries), []),
+        "online_date": next((a.online_date for a in group if a.online_date), None),
+        "document_type": next((a.document_type for a in group if a.document_type), None),
+        "license": next((a.license for a in group if a.license), None),
         "has_abstract": bool(primary.abstract),
         "has_doi": True,
         "is_duplicate_merge": len(group) > 1,
