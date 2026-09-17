@@ -41,26 +41,42 @@ def create_databases() -> None:
     server_engine.dispose()
 
 
+# Additive migrations for `lit_articles`, applied where the column is missing.
+# `create_all` only ever creates absent *tables*, so a column added to a model
+# after a table already exists needs this. Every entry must be nullable and
+# purely additive -- this runs unattended on every pipeline start, so it must
+# never be able to drop or rewrite existing data.
+_ARTICLE_COLUMNS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "reference_count": ("INT NULL", ("bronze", "silver", "gold")),
+    "sources": ("JSON NULL", ("gold",)),
+    # IEEE-only enrichment, see transform/bronze_articles.py.
+    "countries": ("JSON NULL", ("bronze", "silver", "gold")),
+    "online_date": ("DATE NULL", ("bronze", "silver", "gold")),
+    "document_type": ("VARCHAR(128) NULL", ("bronze", "silver", "gold")),
+    "license": ("VARCHAR(64) NULL", ("bronze", "silver", "gold")),
+}
+
+
 def create_tables() -> None:
     for layer, module in _MODELS.items():
         engine = get_engine(layer)
         module.Base.metadata.create_all(engine)
-        if layer in ("bronze", "silver", "gold"):
-            inspector = inspect(engine)
-            if inspector.has_table("lit_articles"):
-                cols = {c["name"] for c in inspector.get_columns("lit_articles")}
-                if "reference_count" not in cols:
-                    with engine.connect() as conn:
-                        conn.execute(
-                            text("ALTER TABLE `lit_articles` ADD COLUMN `reference_count` INT NULL")
-                        )
-                        conn.commit()
-                if layer == "gold" and "sources" not in cols:
-                    with engine.connect() as conn:
-                        conn.execute(
-                            text("ALTER TABLE `lit_articles` ADD COLUMN `sources` JSON NULL")
-                        )
-                        conn.commit()
+
+        inspector = inspect(engine)
+        if not inspector.has_table("lit_articles"):
+            continue
+        existing = {c["name"] for c in inspector.get_columns("lit_articles")}
+        missing = [
+            (name, ddl)
+            for name, (ddl, layers) in _ARTICLE_COLUMNS.items()
+            if layer in layers and name not in existing
+        ]
+        if not missing:
+            continue
+        with engine.connect() as conn:
+            for name, ddl in missing:
+                conn.execute(text(f"ALTER TABLE `lit_articles` ADD COLUMN `{name}` {ddl}"))
+            conn.commit()
 
 
 def bootstrap() -> None:

@@ -21,7 +21,9 @@ from lake_literature.dashboard.data import (
     load_articles_all_layers,
     load_chunk_search_data,
     load_chunks,
+    load_duplicate_pairs,
     load_search_configs,
+    load_semantics,
     pick_best_articles_layer,
     raw_funnel_counts,
 )
@@ -54,6 +56,7 @@ def filter_signature() -> tuple:
         st.session_state.get("global_year_range"),
         tuple(st.session_state.get("global_sources", ())),
         tuple(st.session_state.get("global_venues", ())),
+        st.session_state.get("global_min_relevance"),
     )
 
 
@@ -79,6 +82,35 @@ def chunk_search_data() -> pd.DataFrame:
 @st.cache_data(ttl=60)
 def search_configs() -> pd.DataFrame:
     return load_search_configs()
+
+
+@st.cache_data(ttl=60)
+def semantics() -> pd.DataFrame:
+    """Per-article semantic signals, keyed by DOI.
+
+    Lives in gold while the rest of the dashboard usually reads silver (see
+    `pick_best_articles_layer`), so callers join it on `doi` rather than
+    expecting it as a column of the active layer.
+    """
+    return load_semantics()
+
+
+@st.cache_data(ttl=60)
+def duplicate_pairs() -> pd.DataFrame:
+    return load_duplicate_pairs()
+
+
+def with_semantics(df: pd.DataFrame) -> pd.DataFrame:
+    """Left-join the semantic signals onto an article frame, by DOI.
+
+    Returns `df` untouched when the `semantic` stage has never run, so every
+    page keeps working on a database that only has the older stages.
+    """
+    signals = semantics()
+    if df.empty or signals.empty or "doi" not in df.columns:
+        return df
+    columns = ["doi", "relevance_score", "theme_id", "theme_label", "map_x", "map_y"]
+    return df.merge(signals[columns], on="doi", how="left")
 
 
 def _normalize_article_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -183,6 +215,7 @@ def filter_articles(
     year_range: tuple[int, int] | None = None,
     sources: tuple[str, ...] = (),
     venues: tuple[str, ...] = (),
+    min_relevance: float | None = None,
 ) -> pd.DataFrame:
     """Apply the dashboard-wide filters to the best article layer.
 
@@ -190,12 +223,23 @@ def filter_articles(
     widget never causes another MySQL round-trip. Empty source/venue tuples
     mean "all", which also keeps the state valid when a partial layer lacks a
     column. The source frame is read from `articles()` (itself cached) rather
-    than taken as an argument, so the cache key stays three small tuples
+    than taken as an argument, so the cache key stays a few small values
     instead of a serialized copy of the whole frame.
+
+    `min_relevance` drops articles whose abstract sits too far from the
+    review's topic anchor (see `transform/semantics.py`). Articles with no
+    score yet are always kept: a missing signal must never silently shrink the
+    corpus.
     """
     _, df = articles()
     if df.empty:
         return df
+    if min_relevance is not None:
+        scored = with_semantics(df)
+        if "relevance_score" in scored.columns:
+            df = scored[
+                scored["relevance_score"].isna() | scored["relevance_score"].ge(min_relevance)
+            ]
     filtered = df.copy()
     if year_range and "year" in filtered.columns:
         if isinstance(year_range, (int, float)):

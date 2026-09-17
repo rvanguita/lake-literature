@@ -6,46 +6,136 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `lake-literature` — a systematic-literature-review pipeline over bibliographic exports on the topic
 *"distribution system planning"* (electric power distribution networks). The corpus is assembled by hand from
-publisher search UIs and then processed locally with pandas.
+publisher search UIs (IEEE Xplore + Elsevier/ScienceDirect), then consolidated by a medallion pipeline
+(`src/lake_literature/`) into MySQL and explored through a Streamlit dashboard (`src/lake_literature/dashboard/`).
 
-`src/lake_literature/` now holds a full medallion pipeline (raw → bronze → silver → gold, one MySQL database
-per layer via SQLAlchemy — see `pipeline.py`, `db/`, `ingest/`, `transform/`) plus a Streamlit dashboard
-(`dashboard/`). The corpus under `data/` is still the substantial input the pipeline consumes.
+`README.md` is the project overview; `docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
+canonical reference for **source-data quirks** — the other docs cross-reference it rather than repeat it.
 
 ## Commands
 
 Managed by [uv](https://docs.astral.sh/uv/) (Python 3.13, `uv_build` backend, src layout).
 
 ```bash
-uv sync                                    # create/refresh .venv from uv.lock
-uv run streamlit run main.py               # launch the dashboard from the repo root
-uv run lake-literature --stage all        # run the full raw->bronze->silver->gold pipeline
-uv run lake-literature --stage <layer>    # run a single stage (raw|bronze|silver|gold)
-uv run python -c '...'                     # anything else inside the project venv
-uv add <pkg>                               # add a dependency (updates pyproject.toml + uv.lock)
-uv run pytest                              # run the test suite (tests/, in-memory SQLite, no MySQL needed)
-docker compose up -d                       # dashboard container, port 8501, reads .env for MySQL
+uv sync                                          # create/refresh .venv from uv.lock
+uv run lake-literature --stage all               # full pipeline (default stage)
+uv run lake-literature --stage <stage>           # raw | bronze | silver | gold | embed | semantic
+uv run python -m lake_literature.db.bootstrap    # create the 4 databases + tables only, no ingestion
+uv run streamlit run main.py                     # dashboard at http://localhost:8501
+docker compose up -d                             # Airflow (:8080) + dashboard (:8501), both read .env
+uv run pytest                                    # full suite (in-memory SQLite, no MySQL needed)
+uv run pytest tests/test_silver_articles.py -k merge   # one file / one test
+uv run ruff check --fix && uv run ruff format    # lint + format (config in pyproject.toml)
+uv add <pkg>                                     # add a dependency (updates pyproject.toml + uv.lock)
 ```
 
-Tests live under `tests/` (pytest, added as a dev dependency). They cover pure transform logic
-(`normalize_doi`, `_chunk_text`, `_merge_group`, ...) plus small end-to-end runs of `build_silver_articles`
-against in-memory SQLite sessions — one per medallion layer, mirroring the real one-database-per-layer setup.
-No linter/formatter is configured yet.
+MySQL connection settings and `AIRFLOW_BASE_URL` live in `.env` (git-ignored; see `.env.example`).
 
-`main.py` at the repo root is the Streamlit entry point (`import lake_literature.dashboard.app` for its side
-effects) — it is not the place for ad-hoc pandas exploration anymore; do that in a notebook/interactive cell
-instead. MySQL connection settings live in `.env` (git-ignored; see `.env.example`).
+## Skills
+
+`.claude/skills/` holds the detailed conventions — load the matching one before writing code:
+
+| Skill | Covers |
+|---|---|
+| `medallion-transform` | authoring `ingest/`, `transform/`, `db/`, `pipeline.py` |
+| `pipeline-ops` | *running* stages: local CLI vs. Docker/Airflow, `.env`, idempotency, debugging a run |
+| `streamlit-dashboard` | `dashboard/` page contract, chart contract, theme tokens, aggregation rules |
+| `python-testing-conventions` | pytest layout, per-layer SQLite fixtures, pure-function-first testing |
+
+## Architecture
+
+### Stage graph
+
+`raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py` and each a
+1:1 Airflow DAG (`airflow/dags/lake_literature_dags.py`, thin `BashOperator` wrappers around the same CLI —
+the DAG file deliberately never imports `lake_literature`).
+
+- `raw` — verbatim ingestion, one table per source artifact (`ingest/raw_{csv,bib,pdfs,config}.py`).
+- `bronze` — IEEE CSV + IEEE `.bib` + Elsevier `.bib` unioned into one typed schema. The IEEE CSV is the
+  authoritative record list; `.bib` entries only enter as their own record when their DOI is absent from the CSV.
+- `silver` — dedup by normalized DOI, quality flags, fuzzy PDF linking (rapidfuzz, threshold 85).
+- `gold` — curated `lit_articles` + `lit_chunks` (RAG unit: one `abstract` chunk per article, plus `fulltext`
+  chunks from a linked PDF via pypdf).
+- `embed` — fills `lit_chunks.embedding` locally via `fastembed` (`BAAI/bge-small-en-v1.5`, ONNX, no API key).
+- `semantic` — reads those embeddings, writes `lit_semantics` + `lit_duplicate_pairs`.
+
+**`gold` truncates and rebuilds the chunks, which drops their vectors — re-running it means re-running
+`embed` and then `semantic`.**
+
+### Idempotency, per stage
+
+Each stage has its own re-run contract; preserve it when editing.
+
+- `raw` — content-hash manifest (`ingest/hashing.py` ↔ `lit_source_files`); unchanged files are skipped.
+- `bronze` — upsert keyed on `(source, source_id)`; pagination duplicates within a source collapse naturally.
+  Note `_upsert` writes field by field, so a `None` literal *overwrites* — that's why `ingest/enrichment.py`
+  re-applies the citation/reference-count backfill after every bronze build.
+- `silver` / `gold` — delete-and-rebuild: fully derived from the layer above.
+- `embed` — only processes `embedding IS NULL`; running it twice is a no-op.
+- `semantic` — truncates the two tables it owns, never touches curated article rows.
+
+### Databases
+
+One MySQL database per layer, named plainly after the layer (`raw`, `bronze`, `silver`, `gold`), each with its
+own SQLAlchemy `Base` in `db/<layer>_models.py`. Table names repeat across layers (`lit_articles`) but the
+column sets differ — never assume a column on one layer's model exists on another's.
+
+**These databases are shared with unrelated projects on the same MySQL server.** Only ever create or touch
+`lit_`-prefixed tables.
+
+`db/bootstrap.py` runs on every pipeline start: `create_all` (new tables only) plus the additive migrations in
+`_ARTICLE_COLUMNS`. Adding a column to an existing table requires an entry there, and every entry must be
+nullable and purely additive — it runs unattended.
+
+### Session lifecycle
+
+`pipeline.py` opens one `Session` per layer a stage touches and closes them in a `finally`; transform builders
+take those sessions as arguments and never open their own. That's what lets the whole suite run against
+in-memory SQLite (`tests/conftest.py`, one session fixture per layer) with no MySQL.
+
+`config.relative_path()` / `absolute_path()`: stored file paths are relative to the repo root because the same
+file is `/home/…/data/x.csv` on the host and `/opt/airflow/project/data/x.csv` in the Airflow container —
+raw-layer idempotency keys off that string, so absolute paths duplicate every row on a cross-environment run.
+
+### Dashboard
+
+Strict one-way layering — `data.py` (raw SQL → DataFrame, tolerates a missing table) → `loaders.py` (the only
+`@st.cache_data` layer, plus list-column/`source` normalization) → `analytics.py` / `forecasting.py` /
+`search.py` / `qualis.py` (pure pandas, no `streamlit` import, unit-tested) → `charts.py` (styled Plotly
+figures) → `components.py` → `pages/*.py` (one zero-arg `render()`, registered in `app.py`'s `PAGES`).
+
+Pages are read-only. Pipeline execution goes through Airflow's REST API (`pipeline_control.py` →
+`airflow_client.py`); the single in-process exception is embedding generation, isolated in `actions.py` so
+`pages/` stays free of db/transform access.
+
+The dashboard reads MySQL directly and prefers the **silver** layer (`pick_best_articles_layer`), while
+`lit_semantics` lives in gold — hence `loaders.with_semantics()` joins it on `doi` rather than treating it as
+a column of the active layer.
+
+`main.py` calls `app.main()` **as a function** on purpose: Streamlit re-executes the entry script on every
+rerun, and a module imported for its top-level side effects would only render once.
+
+### Why the `semantic` stage exists
+
+"Distribution system planning" is ambiguous — it also matches logistics/supply-chain papers, and roughly a
+tenth of the corpus is facility-location/cold-chain work plus book front matter ingested as articles.
+Relevance screening is a core SLR step, so every article gets a cosine score against a topic anchor
+(`transform/semantics.py::ANCHOR_TEXT`) and the dashboard lets a reviewer act on it. Nothing is auto-deleted,
+and articles with no score are never filtered out by `loaders.filter_articles`.
 
 ## Data corpus (`data/`, gitignored)
 
 `data/` is excluded from git, so it exists only on this machine and paths referenced in code will not resolve for
 anyone else. Treat it as read-only input: it is raw publisher output, re-downloading it is manual and tedious.
+(A `PreToolUse` hook in `.claude/settings.json` blocks edits to it, except `config.csv`.)
 
 ```
 data/ieee/       IEEE Xplore export: one metadata CSV + paginated .bib files + bulk-download*.zip of PDFs
 data/elsevier/   ScienceDirect export: paginated .bib files only (no CSV, no PDFs)
 data/articles/   ~96 PDFs, extracted from the IEEE bulk-download zips
-data/sciencedirect.zip   original archive that data/elsevier/ was unpacked from
+data/sciencedirect.zip            original archive that data/elsevier/ was unpacked from
+data/enrichment_cache.json        hand-built {doi: {citation_count, reference_count}}, not produced by any code here
+data/classificações_publicadas_*.xlsx   official CAPES/Qualis export (see dashboard/qualis.py)
 ```
 
 **`config.csv` is provenance, not data.** Each source directory has one, and it holds the free-text record of the
@@ -65,10 +155,17 @@ Anything that merges IEEE and Elsevier records has to normalize these difference
 | `doi` field | bare DOI — `10.1109/TPWRS.2024.3418651` | full URL — `https://doi.org/10.1016/j.ijepes.2020.106042` |
 | `keywords` | `;`-separated | `,`-separated |
 | Venue field | `journal` | `journal`, plus `url` and sometimes `note` |
+| Affiliations, online date, document type, license | yes (CSV only) | none |
+| Citation / reference counts | yes (CSV only) | none — backfilled from `enrichment_cache.json` |
 | Full text | yes, PDFs in the zips | none |
 
 DOI is the only reliable cross-source join/dedup key — strip the `https://doi.org/` prefix and casefold before
-comparing, or the same paper indexed by both publishers will survive deduplication twice.
+comparing, or the same paper indexed by both publishers will survive deduplication twice. Records with no DOI
+at all are dropped at silver (counted as `skipped_no_doi`, never silently).
+
+The IEEE-only fields (`countries`, `online_date`, `document_type`, `license`) carry through bronze → silver →
+gold but cover only ~17% of the corpus. **Any analysis built on them must say it covers the IEEE subset**, not
+the whole corpus.
 
 ### BibTeX parsing gotcha
 
@@ -95,8 +192,14 @@ than exact string equality — and prefer DOI-keyed renaming if a linking step i
 The IEEE CSV reports ~304 search hits but the downloaded `.bib` files total ~266 entries, and only ~96 PDFs were
 retrieved. The corpus is deliberately incomplete; do not treat a count mismatch as a bug to fix in code.
 
-## Notes
+## Conventions
 
-- `.env` holds MySQL connection settings plus `AIRFLOW_BASE_URL`; it's git-ignored (see `.env.example` for
-  the expected keys).
-- `README.md` has a full project overview (architecture, quick start, layout) in English.
+- **Language**: code, comments, docstrings and `docs/` are in English; everything the dashboard renders
+  (page titles, captions, warnings) is in Portuguese. Keep both sides consistent when editing a page.
+- **Comments explain *why***, and the existing ones encode hard-won decisions (why a chunk boundary is where it
+  is, why a palette isn't derived from the brand colors, why `fastembed` is imported lazily). Don't strip them.
+- `.claude/settings.json` hooks run on every edit: `ruff check --fix` + `ruff format` on any `.py`, and
+  `uv run pytest -q` after touching `ingest/`, `transform/` or `tests/`. Recursive deletion of `data/`,
+  force-pushes and hard resets are blocked at the Bash tool.
+- `pre-commit` (gitleaks + `scripts/git-hooks/check-docs-branch.sh`) blocks docs-only commits made directly on
+  `main` — put documentation changes on a `docs/<topic>` branch. `main` is protected on GitHub.

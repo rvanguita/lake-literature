@@ -28,7 +28,7 @@ LAYER_TABLES = {
     ],
     "bronze": ["lit_articles"],
     "silver": ["lit_articles"],
-    "gold": ["lit_articles", "lit_chunks"],
+    "gold": ["lit_articles", "lit_chunks", "lit_semantics", "lit_duplicate_pairs"],
 }
 
 
@@ -119,6 +119,20 @@ def load_chunks() -> pd.DataFrame:
     columns = [table.c[name] for name in _CHUNK_LIGHT_COLUMNS if name in table.c]
     columns.append(table.c.embedding.is_not(None).label("has_embedding"))
     return pd.read_sql_query(select(*columns), engine)
+
+
+def load_semantics() -> pd.DataFrame:
+    """Per-article semantic signals from `gold.lit_semantics` (`--stage semantic`)."""
+    if not table_exists("gold", "lit_semantics"):
+        return pd.DataFrame()
+    return pd.read_sql_table("lit_semantics", get_engine("gold"))
+
+
+def load_duplicate_pairs() -> pd.DataFrame:
+    """Near-duplicate abstract pairs flagged by `--stage semantic`."""
+    if not table_exists("gold", "lit_duplicate_pairs"):
+        return pd.DataFrame()
+    return pd.read_sql_table("lit_duplicate_pairs", get_engine("gold"))
 
 
 def load_chunk_search_data() -> pd.DataFrame:
