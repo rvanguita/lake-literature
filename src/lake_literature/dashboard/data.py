@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
-from sqlalchemy import inspect, text
+from sqlalchemy import MetaData, Table, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from lake_literature.db.engines import get_engine
@@ -19,10 +19,16 @@ from lake_literature.db.engines import get_engine
 logger = logging.getLogger(__name__)
 
 LAYER_TABLES = {
-    "raw": ["source_files", "config", "ieee_csv_rows", "bib_entries", "pdf_files"],
-    "bronze": ["articles"],
-    "silver": ["articles"],
-    "gold": ["articles", "chunks"],
+    "raw": [
+        "lit_source_files",
+        "lit_config",
+        "lit_ieee_csv_rows",
+        "lit_bib_entries",
+        "lit_pdf_files",
+    ],
+    "bronze": ["lit_articles"],
+    "silver": ["lit_articles"],
+    "gold": ["lit_articles", "lit_chunks"],
 }
 
 
@@ -30,8 +36,8 @@ def table_exists(layer: str, table: str) -> bool:
     try:
         engine = get_engine(layer)
         return inspect(engine).has_table(table)
-    except SQLAlchemyError:
-        logger.warning("table_exists(%r, %r): database unreachable", layer, table, exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("table_exists(%r, %r): database unreachable (%s)", layer, table, exc)
         return False
 
 
@@ -52,7 +58,7 @@ def layer_row_counts() -> pd.DataFrame:
                     status = "no table yet"
             except SQLAlchemyError as exc:
                 logger.warning(
-                    "layer_row_counts(%r, %r): database unreachable", layer, table, exc_info=True
+                    "layer_row_counts(%r, %r): database unreachable (%s)", layer, table, exc
                 )
                 status = f"unreachable ({type(exc).__name__})"
             rows.append({"layer": layer, "table": table, "rows": count, "status": status})
@@ -60,18 +66,18 @@ def layer_row_counts() -> pd.DataFrame:
 
 
 def load_articles(layer: str) -> pd.DataFrame:
-    if not table_exists(layer, "articles"):
+    if not table_exists(layer, "lit_articles"):
         return pd.DataFrame()
     engine = get_engine(layer)
-    return pd.read_sql_table("articles", engine)
+    return pd.read_sql_table("lit_articles", engine)
 
 
 def load_search_configs() -> pd.DataFrame:
-    """Per-source search provenance from `raw.config` (query, filters, year range, URL)."""
-    if not table_exists("raw", "config"):
+    """Per-source search provenance from `raw.lit_config` (query, filters, year range, URL)."""
+    if not table_exists("raw", "lit_config"):
         return pd.DataFrame()
     engine = get_engine("raw")
-    return pd.read_sql_table("config", engine)
+    return pd.read_sql_table("lit_config", engine)
 
 
 def pick_best_articles_layer() -> tuple[str, pd.DataFrame]:
@@ -93,11 +99,37 @@ def load_articles_all_layers() -> dict[str, pd.DataFrame]:
     return {layer: load_articles(layer) for layer in ("bronze", "silver", "gold")}
 
 
+_CHUNK_LIGHT_COLUMNS = ("id", "doi", "seq", "chunk_type", "char_len", "embed_model", "created_at")
+
+
 def load_chunks() -> pd.DataFrame:
-    if not table_exists("gold", "chunks"):
+    """Lightweight chunk metadata from `gold.lit_chunks`: everything the
+    dashboard's aggregate stats/charts need, without the `text` and
+    `embedding` columns. Both are large per row -- `embedding` is a ~768-float
+    JSON vector -- and unused outside the on-demand search box in
+    `pages/quality.py`, which pulls them separately via
+    `load_chunk_search_data` only once a query is actually submitted.
+    Deserializing them here for every row dominated render time on every page
+    that touches chunk counts (~7s for ~6k rows just for this one query).
+    """
+    if not table_exists("gold", "lit_chunks"):
         return pd.DataFrame()
     engine = get_engine("gold")
-    return pd.read_sql_table("chunks", engine)
+    table = Table("lit_chunks", MetaData(), autoload_with=engine)
+    columns = [table.c[name] for name in _CHUNK_LIGHT_COLUMNS if name in table.c]
+    columns.append(table.c.embedding.is_not(None).label("has_embedding"))
+    return pd.read_sql_query(select(*columns), engine)
+
+
+def load_chunk_search_data() -> pd.DataFrame:
+    """Full chunk rows (`text` + `embedding`), for the search box in
+    `pages/quality.py` -- loaded lazily, only once a query is actually
+    submitted, never on a plain page render.
+    """
+    if not table_exists("gold", "lit_chunks"):
+        return pd.DataFrame()
+    engine = get_engine("gold")
+    return pd.read_sql_table("lit_chunks", engine)
 
 
 def raw_funnel_counts() -> dict[str, dict[str, int]]:
@@ -114,18 +146,18 @@ def raw_funnel_counts() -> dict[str, dict[str, int]]:
     try:
         engine = get_engine("raw")
         with engine.connect() as conn:
-            if inspect(engine).has_table("ieee_csv_rows"):
+            if inspect(engine).has_table("lit_ieee_csv_rows"):
                 counts["ieee"]["csv_rows"] = (
-                    conn.execute(text("SELECT COUNT(*) FROM `ieee_csv_rows`")).scalar() or 0
+                    conn.execute(text("SELECT COUNT(*) FROM `lit_ieee_csv_rows`")).scalar() or 0
                 )
-            if inspect(engine).has_table("bib_entries"):
+            if inspect(engine).has_table("lit_bib_entries"):
                 for source, n in conn.execute(
-                    text("SELECT source, COUNT(*) FROM `bib_entries` GROUP BY source")
+                    text("SELECT source, COUNT(*) FROM `lit_bib_entries` GROUP BY source")
                 ):
                     counts.setdefault(source, {"csv_rows": 0, "bib_entries": 0})
                     counts[source]["bib_entries"] = n
-    except SQLAlchemyError:
-        logger.warning("raw_funnel_counts: database unreachable", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("raw_funnel_counts: database unreachable (%s)", exc)
     return counts
 
 
@@ -139,13 +171,15 @@ def bronze_doi_dropped_counts() -> dict[str, int]:
     result = {"ieee": 0, "elsevier": 0}
     try:
         engine = get_engine("bronze")
-        if not inspect(engine).has_table("articles"):
+        if not inspect(engine).has_table("lit_articles"):
             return result
         with engine.connect() as conn:
             for source, n in conn.execute(
-                text("SELECT source, COUNT(*) FROM `articles` WHERE doi IS NULL GROUP BY source")
+                text(
+                    "SELECT source, COUNT(*) FROM `lit_articles` WHERE doi IS NULL GROUP BY source"
+                )
             ):
                 result[source] = n
-    except SQLAlchemyError:
-        logger.warning("bronze_doi_dropped_counts: database unreachable", exc_info=True)
+    except SQLAlchemyError as exc:
+        logger.warning("bronze_doi_dropped_counts: database unreachable (%s)", exc)
     return result

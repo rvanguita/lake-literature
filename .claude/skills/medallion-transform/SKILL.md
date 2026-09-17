@@ -11,10 +11,14 @@ Dashboard code (`dashboard/`) has its own `streamlit-dashboard` skill.
 
 ## One database per layer, same table names
 
-Four independent MySQL databases — `lit_raw`, `lit_bronze`, `lit_silver`, `lit_gold` (prefix from
-`MYSQL_DB_PREFIX`) — each with its own SQLAlchemy `Base` in `db/{raw,bronze,silver,gold}_models.py`. Table
-names repeat across layers (`articles`, etc.) but each layer's `Article` model has a different, layer-
-appropriate field set — don't assume a column on one layer's model exists on another's.
+Four independent MySQL databases — `raw`, `bronze`, `silver`, `gold`, named plainly after the layer (no
+prefix) — each with its own SQLAlchemy `Base` in `db/{raw,bronze,silver,gold}_models.py`. Table names repeat
+across layers (`lit_articles`, etc.) but each layer's `Article` model has a different, layer-appropriate
+field set — don't assume a column on one layer's model exists on another's.
+
+**These databases are shared with unrelated projects on the same MySQL server** (`raw`/`bronze`/`silver`
+already had other tables before this pipeline existed, e.g. `fastf1_results`, `personal_expenses`). Every
+table this project owns is `lit_`-prefixed; never touch a table in these databases that isn't.
 
 `db/engines.py`'s `get_engine(layer)` (`@cache`d) / `get_session(layer)` is the one access point — always go
 through it, never construct an engine/session directly.
@@ -56,7 +60,7 @@ stats dict. Wire a new stage into `STAGES` and `run_all()`/`run()` in `pipeline.
 ## Ingest loader idempotency (`ingest/raw_*.py`)
 
 Every raw-layer loader follows the same pattern via `ingest/hashing.py`: hash the source file
-(`sha256_file`), check it against `raw.source_files` via `record_source_file()`, and skip re-ingesting an
+(`sha256_file`), check it against `raw.lit_source_files` via `record_source_file()`, and skip re-ingesting an
 unchanged file. Follow this pattern for any new `ingest/raw_*.py` loader rather than inventing a new
 change-detection scheme.
 
