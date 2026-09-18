@@ -299,7 +299,7 @@ def require_articles() -> pd.DataFrame:
         st.warning(
             "Nenhum dado encontrado nas camadas `lit_bronze`, `lit_silver` ou `lit_gold` ainda.\n\n"
             "Execute o pipeline (botões na barra lateral ou "
-            "`uv run lake-literature --stage all`) e recarregue esta página."
+            "`uv run lake-research-map --stage all`) e recarregue esta página."
         )
         st.stop()
     _, df = filtered_articles()

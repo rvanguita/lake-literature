@@ -82,7 +82,7 @@ def render() -> None:
     if funnel_df.empty or funnel_df[["raw", "bronze", "silver", "gold"]].sum().sum() == 0:
         st.warning(
             "Nenhum dado encontrado em nenhuma camada ainda. Execute o pipeline "
-            "(`uv run lake-literature --stage all`) e recarregue esta página."
+            "(`uv run lake-research-map --stage all`) e recarregue esta página."
         )
         return
 

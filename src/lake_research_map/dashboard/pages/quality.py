@@ -112,7 +112,7 @@ def _ieee_extras(articles_df: pd.DataFrame) -> None:
     if "countries" not in articles_df.columns:
         st.info(
             "Colunas de enriquecimento IEEE ainda não existem nesta camada — rode "
-            "`uv run lake-literature --stage bronze` (e silver/gold) para populá-las."
+            "`uv run lake-research-map --stage bronze` (e silver/gold) para populá-las."
         )
         return
 
@@ -458,7 +458,7 @@ def _chunks_intro(chunks_df: pd.DataFrame) -> bool:
     if chunks_df.empty:
         st.info(
             "`lit_gold.chunks` ainda não foi populada — execute a etapa `gold` do pipeline "
-            "(botão na barra lateral ou `uv run lake-literature --stage gold`)."
+            "(botão na barra lateral ou `uv run lake-research-map --stage gold`)."
         )
         return False
 

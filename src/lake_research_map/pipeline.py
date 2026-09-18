@@ -1,13 +1,13 @@
 """CLI orchestrator for the medallion pipeline.
 
 Usage:
-    uv run lake-literature --stage raw
-    uv run lake-literature --stage bronze
-    uv run lake-literature --stage silver
-    uv run lake-literature --stage gold
-    uv run lake-literature --stage embed
-    uv run lake-literature --stage semantic
-    uv run lake-literature --stage all       # default
+    uv run lake-research-map --stage raw
+    uv run lake-research-map --stage bronze
+    uv run lake-research-map --stage silver
+    uv run lake-research-map --stage gold
+    uv run lake-research-map --stage embed
+    uv run lake-research-map --stage semantic
+    uv run lake-research-map --stage all       # default
 """
 
 from __future__ import annotations

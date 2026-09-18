@@ -1,4 +1,4 @@
-"""Multipage Streamlit dashboard for the lake-literature medallion pipeline.
+"""Multipage Streamlit dashboard for the lake-research-map medallion pipeline.
 
 Run from the repo root with:
     uv run streamlit run main.py
@@ -52,7 +52,7 @@ PAGES = [
 
 
 def main() -> None:
-    st.set_page_config(page_title="lake-literature", page_icon="📚", layout="wide")
+    st.set_page_config(page_title="lake-research-map", page_icon="📚", layout="wide")
     # Must run before apply_dashboard_theme() so a just-changed choice is
     # reflected in this same rerun's CSS -- see theme.render_theme_toggle.
     render_theme_toggle()
@@ -63,7 +63,7 @@ def main() -> None:
         for i, (render, title, icon, url_path) in enumerate(PAGES)
     ]
 
-    st.sidebar.header("📚 lake-literature")
+    st.sidebar.header("📚 lake-research-map")
     navigation = st.navigation(
         {
             "Resumo executivo": [page_objects[0]],

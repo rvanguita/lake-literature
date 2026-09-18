@@ -22,7 +22,7 @@ from lake_research_map.ingest.enrichment import ENRICHMENT_CACHE_PATH, _normaliz
 logger = logging.getLogger(__name__)
 
 OPENALEX_BASE_URL = "https://api.openalex.org/works"
-DEFAULT_USER_AGENT = "lake-literature/1.0 (https://github.com/rvanguita/lake-literature; mailto:researcher@example.com)"
+DEFAULT_USER_AGENT = "lake-research-map/1.0 (https://github.com/rvanguita/lake-research-map; mailto:researcher@example.com)"
 
 
 def fetch_openalex_work(

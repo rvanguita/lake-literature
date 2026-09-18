@@ -50,7 +50,7 @@ def render() -> None:
     if signals.empty:
         st.info(
             "A etapa `semantic` ainda não foi executada — rode o botão na barra lateral ou "
-            "`uv run lake-literature --stage semantic`. Ela depende de `gold` e `embed`."
+            "`uv run lake-research-map --stage semantic`. Ela depende de `gold` e `embed`."
         )
         return
 

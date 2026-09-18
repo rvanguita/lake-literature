@@ -27,7 +27,7 @@ def render() -> None:
     if configs_df.empty:
         st.info(
             "`raw.config` ainda não foi populada — execute a etapa `raw` do pipeline "
-            "(botão na barra lateral ou `uv run lake-literature --stage raw`)."
+            "(botão na barra lateral ou `uv run lake-research-map --stage raw`)."
         )
         return
 
