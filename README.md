@@ -267,7 +267,7 @@ lake-research-map/
 │   ├── SDD.md                    # System Design Document
 │   ├── ROADMAP.md                # Strategic research & feature backlog
 │   └── images/
-│       ├── lake_research_map_hero.png # Transparent RGBA hero illustration
+│       ├── lake_research_map_hero.png # High-resolution hero illustration (white background)
 │       ├── architecture.svg      # Legacy pipeline architecture diagram
 │       └── medallion_architecture.svg # Modern white-background medallion architecture diagram
 ├── scripts/git-hooks/            # Pre-commit hook shell scripts
