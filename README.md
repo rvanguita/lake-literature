@@ -1,5 +1,7 @@
 # lake-literature
 
+![lake-literature: Medallion Data Lake & Scientometric Analytics for Electric Power Distribution System Planning](docs/images/lake_literature_hero.png)
+
 Writing a new article on **"distribution system planning"** (electric power distribution networks) means
 knowing, out of several hundred candidate papers scattered across publisher databases, which ones are
 actually worth citing. `lake-literature` turns hand-assembled bibliographic exports from IEEE Xplore and
@@ -7,8 +9,9 @@ Elsevier/ScienceDirect into a clean, deduplicated, RAG-ready corpus that answers
 anyone having to query MySQL directly.
 
 For the full product rationale see [`docs/PRD.md`](docs/PRD.md); for the system design see
-[`docs/SDD.md`](docs/SDD.md); for the exact quirks of the source data (BibTeX parsing gotchas, DOI format
-differences, lossy PDF filename matching) see [`CLAUDE.md`](CLAUDE.md).
+[`docs/SDD.md`](docs/SDD.md); for guidelines and agent conventions see [`AGENTS.md`](AGENTS.md); for the
+exact quirks of the source data (BibTeX parsing gotchas, DOI format differences, lossy PDF filename
+matching) see [`CLAUDE.md`](CLAUDE.md).
 
 ![Pipeline architecture: IEEE Xplore and Elsevier/ScienceDirect flowing through the raw, bronze, silver, gold and embed layers, orchestrated by Apache Airflow, feeding the Streamlit dashboard](docs/images/architecture.svg)
 
@@ -44,23 +47,26 @@ read-only input by the pipeline. See [`CLAUDE.md`](CLAUDE.md) for the parsing go
 ## Dashboard
 
 A **Streamlit dashboard** (`src/lake_literature/dashboard/`) visualizes the corpus at every pipeline stage,
-across ten pages:
+across thirteen modular pages organized with **strict chart deduplication** across tabs:
 
 | Page | What it shows |
 |---|---|
-| Overview | headline corpus counts, source distribution, publication-year spread, bibliometric correlations, editorial concentration |
-| Output Over Time | volume by year and by CAPES/Qualis tier, cumulative growth by periódico, IEEE vs. Elsevier comparison, author-team-size trends |
-| Topics & Venues | periódico ranking, CAPES/Qualis classification, keyword statistics with an interactive filter/explorer, keyword-share evolution |
-| Highlights & Impact | reference-count distribution, citation impact, collaboration, author/venue rankings |
-| Researchers | canonicalized author ranking, production over time, co-authorship network, per-topic research-line leaders, concentration/Gini analysis |
-| Semantics & Relevance | relevance screening against both readings of the query, the semantic map of the corpus, automatically discovered themes, near-duplicate abstracts |
-| Trends & Forecast | regression-based forecasts of publication volume (per source) and of keyword-level growth |
-| Layers & Pipeline | funnel + per-layer record counts and drift checks, with buttons to trigger a pipeline stage |
-| Quality & RAG | metadata richness, full-text coverage, chunk/embedding readiness, with a button to run the `embed` stage directly |
+| Overview | headline corpus counts, source distribution, publication-year spread, and editorial concentration macro summaries |
+| Output Over Time | strictly chronological views: annual volume, cumulative growth by journal, IEEE vs. Elsevier comparison, and Qualis strata evolution |
+| Topics & Venues | unified journal ranking (volume vs impact toggle), CAPES/Qualis classification, Bradford zones, semantic centroids, Zipf's law, dynamic c-TF-IDF, conceptual atypicality, and Chow structural breaks |
+| Highlights & Impact | theoretical foundations (distribution viewer, top referenced) and citation dynamics & econometrics (top cited, citations by year, heavy-tail MLE, age-normalized percentiles, Poisson GLM) |
+| Researchers | definitive Author Hub: productivity ranking, scientific leadership ($h, g, e, m$-indices), career trajectory, co-authorship Louvain network & small-world topology, research lines, and Lotka's law |
+| Semantics & Relevance | relevance screening against both readings of the query, multi-projection 2D map (t-SNE/UMAP/PCA), discovered themes, novelty score, and duplicate pairs |
+| Trends & Forecast | regression-based volume forecasts with dynamic expanding prediction intervals ($\sigma \sqrt{h}$), rolling-origin CV, keyword trajectories, and continuous Bass innovation diffusion |
+| Strategic Scientometrics | Callon's strategic diagram (density vs. centrality), keyword co-occurrence (Jaccard + Louvain), centroid similarity ($8 \times 8$), transparent maturity radar, Spearman correlations, Shannon entropy, and international collaboration |
+| Methodological Synthesis | mathematical complexity spectrum (MILP, SOCP, MINLP, AI), multi-objective co-optimization taxonomy, uncertainty modeling vs DER resources, planning horizons, IEEE benchmark feeders, solvers/simulators, and citation longevity & stylometrics |
+| Technological Frontiers | Price's index of theoretical youth, delayed-recognition Sleeping Beauties ($B$ coefficient), Wu et al. $CD$ disruption index, Open Access citation advantage (OACA), and Kleinberg technological burst timelines |
+| Layers & Pipeline | funnel + per-layer record counts and drift checks, pipeline run history (`lit_pipeline_runs`), rejected records audit (`lit_rejected`), and stage execution controls |
+| Quality & RAG | metadata richness, full-text coverage, chunk/embedding readiness, Isolation Forest anomaly audit, and hybrid BM25 + dense vector search (RRF) |
 | Search Configuration | the provenance recorded in each source's `config.csv` (query, filters, search URL) |
 
-Every page's charts are organized into tabs — several with a further layer of sub-tabs — so each page stays
-one screen instead of an endless scroll. Page labels in the running app are in Portuguese; the table above
+Every page's charts are organized into tabs so each page stays one screen instead of an endless scroll,
+with **zero chart redundancy across tabs**. Page labels in the running app are in Portuguese; the table above
 uses their English meaning.
 
 Pipeline execution is orchestrated by **Apache Airflow**: one DAG per stage
@@ -114,10 +120,13 @@ uv run pytest        # tests/ — pure transform logic + bronze/silver/gold buil
 uv run ruff check     # lint (E, F, I, UP, B rulesets; see pyproject.toml)
 ```
 
-The suite (`tests/`) covers DOI normalization, bronze/silver dedup and merge logic, PDF fuzzy-matching, gold
-chunking, CAPES/Qualis venue matching, author-analytics helpers, and vector-similarity ranking — all against
-in-memory SQLite, so none of it needs a live MySQL server. It does not cover Airflow DAGs, the Streamlit UI,
-or file parsing against the real (gitignored) `data/` corpus — those stay manually verified.
+The suite (`tests/`) contains **186 automated tests across 22 test files**, covering DOI normalization,
+bronze/silver dedup and merge logic, PDF fuzzy-matching, gold chunking, CAPES/Qualis venue matching,
+pure analytics aggregations, heavy-tail distributions, complex network topologies, machine learning models,
+strategic scientometrics, methodological synthesis, technological frontiers, BM25 Okapi & RRF hybrid search,
+continuous Bass NLS diffusion, structural breaks, conceptual atypicality, and Faiss vector indexing — all
+against in-memory SQLite, so none of it needs a live MySQL server. It does not cover file parsing against the
+real (gitignored) `data/` corpus — those stay manually verified.
 
 ## Git hooks
 
@@ -149,21 +158,22 @@ src/lake_literature/
   config.py             env/settings (MySQL + Airflow base URL)
   db/                    SQLAlchemy models and engines, one module set per medallion layer
                           (raw_models, bronze_models, silver_models, gold_models, engines, bootstrap)
-  ingest/                raw-layer loaders (raw_csv, raw_bib, raw_pdfs, raw_config, enrichment, hashing)
+  ingest/                raw-layer loaders (raw_csv, raw_bib, raw_pdfs, raw_config, openalex, hashing)
   transform/             bronze/silver/gold builders + embeddings.py (`embed`) + semantics.py (`semantic`)
+                          + screening_calibration.py
   pipeline.py            CLI entrypoint (`lake-literature --stage ...`)
   dashboard/
     app.py                Streamlit entry point, page registry, navigation
     pages/                one module per page (overview, production, topics, highlights,
-                           researchers, semantics, forecasting, pipeline_layers, quality,
-                           search_config)
+                           researchers, semantics, strategic, synthesis, frontiers,
+                           forecasting, pipeline_layers, quality, search_config)
     airflow_client.py      thin REST client for triggering/polling Airflow DAG runs
     pipeline_control.py    dashboard-side glue between pages and airflow_client
     analytics.py, charts.py, data.py, loaders.py, forecasting.py, theme.py, components.py
 airflow/dags/            DAG definitions (thin wrappers around `uv run lake-literature --stage X`)
 docs/                     PRD.md, SDD.md, ROADMAP.md, images/architecture.svg
 scripts/git-hooks/        local pre-commit hook scripts
-tests/                    pytest suite (in-memory SQLite, no MySQL needed)
+tests/                    pytest suite (186 tests across 22 files, in-memory SQLite, no MySQL needed)
 main.py                  root Streamlit entry point (`import lake_literature.dashboard.app`)
 ```
 
@@ -171,14 +181,18 @@ main.py                  root Streamlit entry point (`import lake_literature.das
 
 - **No duplicate DOIs** in `silver`/`gold`'s `lit_articles` after a full pipeline run over the current corpus.
 - **Idempotent re-runs**: running `--stage all` twice in a row on unchanged `data/` doesn't change row counts.
-- **Embedding coverage**: `gold.lit_chunks.embedding` is filled by the `embed` stage
-  (`transform/embeddings.py`, `BAAI/bge-small-en-v1.5` via `fastembed`, entirely local) and is idempotent —
-  re-running only embeds chunks still missing a vector. The "Qualidade e RAG" dashboard page has a gauge for
-  this and a button to trigger the stage directly.
-- **Retrieval**: implemented as in-process cosine similarity over `gold.lit_chunks.embedding`
-  (`dashboard/search.py`, scikit-learn) — not a persisted vector index. Acceptable at the corpus's current
-  size (a few thousand chunks); a real vector store (pgvector, FAISS) would be the next step at an order of
-  magnitude more data. Falls back to keyword matching before the `embed` stage has run.
+- **Binary embedding efficiency**: `gold.lit_chunks.embedding_bin` stores native float32 vectors (~9 MB, ~1.5 KB/vector),
+  cutting storage footprint by 82% compared to legacy JSON strings and enabling zero-copy `np.frombuffer` loads.
+- **Fast vector retrieval & Hybrid Search**: accelerated vector search engine (`dashboard/search.py`) supporting
+  Faiss (`IndexFlatIP`, `IndexFlatL2`), vectorized fallback, pure Python BM25 Okapi, and Reciprocal Rank Fusion (RRF)
+  hybrid retrieval across binary BLOBs and lexical tokens.
+- **Audited analytical engine**: 61+ pure analytical functions in `dashboard/analytics.py` audited and optimized
+  for statistical rigor (weighted Louvain, inverted distance weights for path centralities, contiguous career slope
+  estimation with zero-gap filling, unpenalized Poisson GLM, Weighted Least Squares Lotka fitting, vectorized matrix dot-products,
+  cross-epoch global vocabulary dynamic c-TF-IDF, Chow/SSE changepoint detection, and Uzzi et al. 2013 conceptual atypicality).
+- **Advanced Forecasting & Diffusion**: multi-model forecasting with dynamic expanding prediction intervals
+  ($\text{margin} = 1.96 \cdot \text{residual\_std} \cdot \sqrt{h}$) and bounded non-linear least squares (`curve_fit`)
+  continuous Bass innovation diffusion ($p, q, m$).
 - **Relevance screening**: every article is scored against the review's topic *and* against the logistics
   reading of the same ambiguous query; the margin between them is the screening signal, and its zero is the
   cut. On the current corpus 165 of 1,831 articles (9%) fall below it, 145 of them inside the logistics
@@ -187,4 +201,4 @@ main.py                  root Streamlit entry point (`import lake_literature.das
 - **Corpus refresh remains manual**: adding new export files to `data/` and re-running the pipeline is a
   deliberate, unautomated step — there is no scheduled or triggered re-scrape (see PRD §3 for the full list
   of non-goals).
-- **What's next**: the measured improvement backlog lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **What's next**: the strategic improvement backlog and research roadmap live in [`docs/ROADMAP.md`](docs/ROADMAP.md).
