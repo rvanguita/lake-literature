@@ -1,9 +1,9 @@
 ---
 name: streamlit-dashboard
-description: Conventions for the lake-literature Streamlit dashboard (src/lake_literature/dashboard/) — page contract, chart contract, theme tokens, aggregation rules, and data pitfalls. Use whenever adding or editing a dashboard page, chart, or shared helper.
+description: Conventions for the lake-research-map Streamlit dashboard (src/lake_research_map/dashboard/) — page contract, chart contract, theme tokens, aggregation rules, and data pitfalls. Use whenever adding or editing a dashboard page, chart, or shared helper.
 ---
 
-# lake-literature Streamlit dashboard
+# lake-research-map Streamlit dashboard
 
 This dashboard grew past 2,600 lines with real duplication before a refactor
 (see git history around "Refatoração do dashboard + novas análises"). These

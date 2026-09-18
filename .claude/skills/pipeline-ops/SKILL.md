@@ -1,9 +1,9 @@
 ---
 name: pipeline-ops
-description: Running and operating the lake-literature pipeline — local CLI vs. Docker/Airflow, .env/bootstrap setup, stage idempotency, where run stats go. Use whenever running a pipeline stage, debugging a failed run, or deciding between local and Airflow execution.
+description: Running and operating the lake-research-map pipeline — local CLI vs. Docker/Airflow, .env/bootstrap setup, stage idempotency, where run stats go. Use whenever running a pipeline stage, debugging a failed run, or deciding between local and Airflow execution.
 ---
 
-# Running the lake-literature pipeline
+# Running the lake-research-map pipeline
 
 This is the "how do I actually execute this" skill — for how to *write* ingest/transform code, see
 `medallion-transform` instead.
@@ -11,7 +11,7 @@ This is the "how do I actually execute this" skill — for how to *write* ingest
 ## Local vs. Docker/Airflow
 
 ```bash
-uv run lake-literature --stage {raw,bronze,silver,gold,embed,all}   # local, one-shot
+uv run lake-research-map --stage {raw,bronze,silver,gold,embed,all}   # local, one-shot
 docker compose up -d                                                 # Airflow + dashboard, port 8080/8501
 ```
 
@@ -21,8 +21,8 @@ dashboard's "Layers & Pipeline"/"Quality & RAG" pages, which trigger stages thro
 (`dashboard/airflow_client.py`) rather than running the pipeline in-process — those buttons don't work
 without Airflow running.
 
-Both paths run the exact same code: `airflow/dags/lake_literature_dags.py`'s DAGs are thin `BashOperator`
-wrappers around `uv run lake-literature --stage X`, so there's no separate "Airflow version" of the pipeline
+Both paths run the exact same code: `airflow/dags/lake_research_map_dags.py`'s DAGs are thin `BashOperator`
+wrappers around `uv run lake-research-map --stage X`, so there's no separate "Airflow version" of the pipeline
 logic to keep in sync.
 
 ## Environment setup

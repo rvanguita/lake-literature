@@ -1,12 +1,12 @@
 ---
 name: python-testing-conventions
-description: pytest conventions for lake-literature — pure-function-first testing, per-medallion-layer in-memory SQLite fixtures, no mocking. Use whenever writing or extending tests under tests/, for pipeline transform code or dashboard analytics code.
+description: pytest conventions for lake-research-map — pure-function-first testing, per-medallion-layer in-memory SQLite fixtures, no mocking. Use whenever writing or extending tests under tests/, for pipeline transform code or dashboard analytics code.
 ---
 
-# lake-literature testing conventions
+# lake-research-map testing conventions
 
-Applies repo-wide — both `src/lake_literature/{ingest,transform}/` pipeline code and
-`src/lake_literature/dashboard/analytics.py`/`forecasting.py`/`search.py` (all pure pandas, no `streamlit`
+Applies repo-wide — both `src/lake_research_map/{ingest,transform}/` pipeline code and
+`src/lake_research_map/dashboard/analytics.py`/`forecasting.py`/`search.py` (all pure pandas, no `streamlit`
 import, exactly so they're unit-testable). Run with `uv run pytest` (`testpaths = ["tests"]` in
 `pyproject.toml`).
 

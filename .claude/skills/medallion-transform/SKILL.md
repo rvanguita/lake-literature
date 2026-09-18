@@ -3,9 +3,9 @@ name: medallion-transform
 description: Conventions for adding/editing pipeline code under ingest/, transform/, db/, and pipeline.py — the raw→bronze→silver→gold→embed medallion stages. Use whenever adding an ingest loader, a transform builder, a new model column, or wiring a stage into the CLI/Airflow.
 ---
 
-# lake-literature medallion pipeline
+# lake-research-map medallion pipeline
 
-This is the authoring-side skill for the pipeline itself (`src/lake_literature/{ingest,transform,db}/`
+This is the authoring-side skill for the pipeline itself (`src/lake_research_map/{ingest,transform,db}/`
 and `pipeline.py`) — how to actually *run* it, locally or via Airflow, is the `pipeline-ops` skill instead.
 Dashboard code (`dashboard/`) has its own `streamlit-dashboard` skill.
 
@@ -54,8 +54,8 @@ def run_X() -> dict:
 
 Keep new/changed stages in this shape: always close every session in `finally`, always return and print a
 stats dict. Wire a new stage into `STAGES` and `run_all()`/`run()` in `pipeline.py`, and add a matching
-`BashOperator` DAG in `airflow/dags/lake_literature_dags.py` (thin wrapper shelling out to
-`uv run lake-literature --stage X` — DAGs deliberately don't import `lake_literature` directly).
+`BashOperator` DAG in `airflow/dags/lake_research_map_dags.py` (thin wrapper shelling out to
+`uv run lake-research-map --stage X` — DAGs deliberately don't import `lake_research_map` directly).
 
 ## Ingest loader idempotency (`ingest/raw_*.py`)
 

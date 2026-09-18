@@ -4,8 +4,8 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /opt/airflow/project
 
-# The project itself, so `uv run lake-literature --stage <stage>` (what every
-# DAG's BashOperator shells out to, see airflow/dags/lake_literature_dags.py)
+# The project itself, so `uv run lake-research-map --stage <stage>` (what every
+# DAG's BashOperator shells out to, see airflow/dags/lake_research_map_dags.py)
 # works from inside the container.
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
