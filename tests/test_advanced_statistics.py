@@ -6,7 +6,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     age_normalized_citations,
     bradford_zones,
     citation_determinants_glm,
@@ -156,7 +156,7 @@ def test_graph_advanced_metrics_centralities_and_small_world():
 
 
 def test_detect_structural_breaks():
-    from lake_literature.dashboard.analytics import detect_structural_breaks
+    from lake_research_map.dashboard.analytics import detect_structural_breaks
 
     # Regime 1: mean 10, Regime 2: mean 50
     years = np.arange(2000, 2020)
@@ -174,7 +174,7 @@ def test_detect_structural_breaks():
 
 
 def test_conceptual_atypicality_analysis():
-    from lake_literature.dashboard.analytics import conceptual_atypicality_analysis
+    from lake_research_map.dashboard.analytics import conceptual_atypicality_analysis
 
     df = pd.DataFrame(
         [
@@ -198,7 +198,7 @@ def test_conceptual_atypicality_analysis():
 
 
 def test_venue_semantic_clusters():
-    from lake_literature.dashboard.analytics import venue_semantic_clusters
+    from lake_research_map.dashboard.analytics import venue_semantic_clusters
 
     dois = [f"10.1/{i}" for i in range(8)]
     venues = (

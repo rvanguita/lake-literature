@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from lake_literature.ingest.openalex import (
+from lake_research_map.ingest.openalex import (
     enrich_cache_from_openalex,
     fetch_openalex_work,
 )

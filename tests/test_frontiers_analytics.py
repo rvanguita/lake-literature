@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     disruption_index_estimation,
     open_access_impact_analysis,
     price_index_analysis,
@@ -179,6 +179,6 @@ def test_technological_burst_detection() -> None:
 
 
 def test_frontiers_page_import() -> None:
-    from lake_literature.dashboard.pages import frontiers
+    from lake_research_map.dashboard.pages import frontiers
 
     assert callable(frontiers.render)

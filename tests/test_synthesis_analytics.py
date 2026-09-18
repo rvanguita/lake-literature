@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     author_impact_advanced_indices,
     author_m_quotient_analysis,
     benchmark_feeders_analysis,
@@ -257,7 +257,7 @@ def test_author_m_quotient_analysis():
 
 
 def test_synthesis_page_import():
-    from lake_literature.dashboard.pages import synthesis
+    from lake_research_map.dashboard.pages import synthesis
 
     assert hasattr(synthesis, "render")
     assert hasattr(synthesis, "_render_methods_tab")

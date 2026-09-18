@@ -1,7 +1,7 @@
 [project]
-name = "lake-literature"
+name = "lake-research-map"
 version = "0.1.0"
-description = "Medallion pipeline turning IEEE Xplore and Elsevier/ScienceDirect bibliographic exports into a deduplicated, RAG-ready literature corpus"
+description = "Medallion data lake and analytical research platform turning IEEE Xplore and Elsevier bibliographic exports into a deduplicated, RAG-ready literature corpus"
 readme = "README.md"
 authors = [
     { name = "Rene", email = "renevajr@gmail.com" }
@@ -25,7 +25,8 @@ dependencies = [
 ]
 
 [project.scripts]
-lake-literature = "lake_literature:main"
+lake-research-map = "lake_research_map:main"
+lake-literature = "lake_research_map:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]

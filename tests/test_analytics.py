@@ -1,6 +1,6 @@
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     OTHERS_LABEL,
     cumulative_by_category,
     cumulative_by_venue,

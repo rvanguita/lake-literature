@@ -1,6 +1,6 @@
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     analyze_coauthorship_partners,
     author_productivity_trend,
     author_year_matrix,

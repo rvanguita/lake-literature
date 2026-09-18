@@ -69,9 +69,12 @@ def test_dag_module_imports_and_defines_expected_dags():
 
     with unittest.mock.patch.dict(sys.modules, modules_to_mock):
         spec = importlib.util.spec_from_file_location(
-            "lake_literature_dags",
+            "lake_research_map_dags",
             str(
-                Path(__file__).resolve().parents[1] / "airflow" / "dags" / "lake_literature_dags.py"
+                Path(__file__).resolve().parents[1]
+                / "airflow"
+                / "dags"
+                / "lake_research_map_dags.py"
             ),
         )
         assert spec is not None and spec.loader is not None
@@ -82,10 +85,10 @@ def test_dag_module_imports_and_defines_expected_dags():
 
     # Every per-stage DAG that the dashboard can trigger individually.
     for stage in ("raw", "bronze", "silver", "gold", "embed", "semantic"):
-        assert f"lake_literature_{stage}" in dag_ids, f"missing DAG lake_literature_{stage}"
+        assert f"lake_research_map_{stage}" in dag_ids, f"missing DAG lake_research_map_{stage}"
 
     # The combined "run all" DAG.
-    assert "lake_literature_all" in dag_ids
+    assert "lake_research_map_all" in dag_ids
 
     # Total: 6 per-stage + 1 combined = 7.
     assert len(dag_ids) == 7

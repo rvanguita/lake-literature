@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.search import (
+from lake_research_map.dashboard.search import (
     _rank_by_similarity,
     build_vector_index,
     search_vector_index,
@@ -83,7 +83,7 @@ def test_build_vector_index_empty():
 
 
 def test_bm25_search_ranks_matching_keywords():
-    from lake_literature.dashboard.search import bm25_search
+    from lake_research_map.dashboard.search import bm25_search
 
     df = pd.DataFrame(
         [
@@ -99,7 +99,7 @@ def test_bm25_search_ranks_matching_keywords():
 
 
 def test_hybrid_search_rrf_merges_dense_and_sparse():
-    from lake_literature.dashboard.search import hybrid_search_rrf
+    from lake_research_map.dashboard.search import hybrid_search_rrf
 
     df = pd.DataFrame(
         [

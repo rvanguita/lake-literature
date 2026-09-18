@@ -10,7 +10,7 @@ import itertools
 
 import numpy as np
 
-from lake_literature.transform.semantics import (
+from lake_research_map.transform.semantics import (
     discover_themes,
     near_duplicate_pairs,
     project_2d,
@@ -246,8 +246,8 @@ def test_theme_labels_fall_back_to_numbers_without_a_vocabulary():
 def test_build_semantics_end_to_end_with_injected_anchors(gold_session):
     """build_semantics runs to completion with injected anchor vectors,
     bypassing the fastembed model entirely."""
-    from lake_literature.db.gold_models import Chunk, Semantics
-    from lake_literature.transform.semantics import build_semantics
+    from lake_research_map.db.gold_models import Chunk, Semantics
+    from lake_research_map.transform.semantics import build_semantics
 
     rng = np.random.default_rng(42)
     n = 12

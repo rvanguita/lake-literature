@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from lake_literature.transform.screening_calibration import (
+from lake_research_map.transform.screening_calibration import (
     evaluate_screening_threshold,
     find_optimal_screening_threshold,
     generate_stratified_screening_sample,

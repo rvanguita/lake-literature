@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lake_literature.dashboard.forecasting import fit_bass_diffusion, fit_quantile_forecast
+from lake_research_map.dashboard.forecasting import fit_bass_diffusion, fit_quantile_forecast
 
 
 def test_fit_quantile_forecast():
@@ -33,7 +33,7 @@ def test_fit_bass_diffusion():
 def test_detect_bibliometric_anomalies():
     import pandas as pd
 
-    from lake_literature.dashboard.analytics import detect_bibliometric_anomalies
+    from lake_research_map.dashboard.analytics import detect_bibliometric_anomalies
 
     rng = np.random.default_rng(42)
     n = 40
@@ -62,7 +62,7 @@ def test_detect_bibliometric_anomalies():
 def test_dynamic_topic_ctfidf():
     import pandas as pd
 
-    from lake_literature.dashboard.analytics import dynamic_topic_ctfidf
+    from lake_research_map.dashboard.analytics import dynamic_topic_ctfidf
 
     df = pd.DataFrame(
         {

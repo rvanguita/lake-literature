@@ -15,7 +15,7 @@ import plotly.express as px
 import pytest
 import streamlit as st
 
-from lake_literature.dashboard.theme import (
+from lake_research_map.dashboard.theme import (
     _DARK_TOKENS,
     _LIGHT_TOKENS,
     _THEME_STATE_KEY,
@@ -102,7 +102,7 @@ def test_polish_figure_layout_preserves_heatmap_textfont() -> None:
 
 
 def test_page_header_accepts_two_and_three_args(monkeypatch) -> None:
-    from lake_literature.dashboard.components import page_header
+    from lake_research_map.dashboard.components import page_header
 
     recorded = []
 
@@ -121,7 +121,7 @@ def test_page_header_accepts_two_and_three_args(monkeypatch) -> None:
 
 
 def test_all_dashboard_pages_importable_and_render_callable() -> None:
-    from lake_literature.dashboard.app import PAGES
+    from lake_research_map.dashboard.app import PAGES
 
     assert len(PAGES) == 13
     for render_fn, title, icon, url_path in PAGES:
@@ -134,7 +134,7 @@ def test_all_dashboard_pages_importable_and_render_callable() -> None:
 def test_polar_figure_gets_transparent_background() -> None:
     import plotly.graph_objects as go
 
-    from lake_literature.dashboard.theme import CHART_PAPER_BG, polish_figure_layout
+    from lake_research_map.dashboard.theme import CHART_PAPER_BG, polish_figure_layout
 
     fig = go.Figure(data=go.Scatterpolar(r=[10, 20, 30], theta=["A", "B", "C"]))
     polish_figure_layout(fig)

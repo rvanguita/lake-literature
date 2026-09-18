@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lake_literature.transform.semantics import (
+from lake_research_map.transform.semantics import (
     compute_semantic_novelty,
     compute_temporal_drift,
     compute_thematic_centroids,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
     callon_strategic_diagram,
     geographic_collaboration_stats,
     keyword_cooccurrence_graph,

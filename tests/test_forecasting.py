@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.forecasting import (
+from lake_research_map.dashboard.forecasting import (
     _fit_model,
     _mae,
     fit_and_forecast,
@@ -156,7 +156,7 @@ def test_yearly_counts_filters_by_source():
 
 
 def test_fit_bass_diffusion_nls():
-    from lake_literature.dashboard.forecasting import fit_bass_diffusion_nls
+    from lake_research_map.dashboard.forecasting import fit_bass_diffusion_nls
 
     years = np.arange(2010, 2021)
     # S-curve adoption pattern
