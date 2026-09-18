@@ -241,3 +241,47 @@ def test_theme_labels_fall_back_to_numbers_without_a_vocabulary():
     result = theme_labels_from_terms(["", "", "", ""], labels)
 
     assert result == {0: "Tema 1", 1: "Tema 2"}
+
+
+def test_build_semantics_end_to_end_with_injected_anchors(gold_session):
+    """build_semantics runs to completion with injected anchor vectors,
+    bypassing the fastembed model entirely."""
+    from lake_literature.db.gold_models import Chunk, Semantics
+    from lake_literature.transform.semantics import build_semantics
+
+    rng = np.random.default_rng(42)
+    n = 12
+    dim = 384
+
+    # Create gold chunks with embeddings to simulate an embedded corpus.
+    for i in range(n):
+        vec = rng.standard_normal(dim).astype(np.float32)
+        vec /= np.linalg.norm(vec)
+        gold_session.add(
+            Chunk(
+                doi=f"10.1000/test-{i}",
+                seq=0,
+                chunk_type="abstract",
+                text=f"distribution planning article number {i} about power systems"
+                if i < 8
+                else f"logistics warehouse routing freight article {i}",
+                char_len=60,
+                embedding=vec.tolist(),
+            )
+        )
+    gold_session.commit()
+
+    # Inject anchor vectors instead of loading the real embedding model.
+    topic_anchor = rng.standard_normal(dim).astype(np.float32)
+    off_anchor = rng.standard_normal(dim).astype(np.float32)
+
+    stats = build_semantics(gold_session, anchor_vectors=(topic_anchor, off_anchor))
+
+    assert stats["articles"] == n
+    assert stats["themes"] > 0
+    assert "median_relevance" in stats
+    assert "median_margin" in stats
+
+    # Verify lit_semantics rows were written.
+    sem_count = gold_session.query(Semantics).count()
+    assert sem_count == n

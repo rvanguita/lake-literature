@@ -1,7 +1,11 @@
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.search import _rank_by_similarity
+from lake_literature.dashboard.search import (
+    _rank_by_similarity,
+    build_vector_index,
+    search_vector_index,
+)
 
 
 def _chunks_df() -> pd.DataFrame:
@@ -47,3 +51,74 @@ def test_rank_by_similarity_no_embedding_column_returns_empty():
     df = pd.DataFrame([{"doi": "10.1/c", "text": "no embedding column"}])
     result = _rank_by_similarity(np.array([1.0, 0.0, 0.0]), df, top_k=10)
     assert result.empty
+
+
+def test_build_and_search_vector_index():
+    matrix = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    idx = build_vector_index(matrix)
+    assert idx is not None
+
+    query = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    indices, sims = search_vector_index(idx, query, top_k=2)
+    assert len(indices) == 2
+    assert indices[0] == 0
+    assert indices[1] == 1
+    assert sims[0] >= sims[1]
+    assert np.isclose(sims[0], 1.0, atol=1e-4)
+
+
+def test_build_vector_index_empty():
+    empty = np.zeros((0, 3), dtype=np.float32)
+    idx = build_vector_index(empty)
+    assert idx is None
+    indices, sims = search_vector_index(idx, np.array([1.0, 0.0, 0.0]))
+    assert len(indices) == 0
+
+
+def test_bm25_search_ranks_matching_keywords():
+    from lake_literature.dashboard.search import bm25_search
+
+    df = pd.DataFrame(
+        [
+            {"id": 1, "text": "Optimal distribution planning with solar PV systems"},
+            {"id": 2, "text": "Electric vehicle charging stations and battery storage"},
+            {"id": 3, "text": "Unrelated supply chain logistics optimization"},
+        ]
+    )
+    res = bm25_search("distribution planning", df, top_k=5)
+    assert not res.empty
+    assert res.iloc[0]["id"] == 1
+    assert res.iloc[0]["bm25_score"] > 0
+
+
+def test_hybrid_search_rrf_merges_dense_and_sparse():
+    from lake_literature.dashboard.search import hybrid_search_rrf
+
+    df = pd.DataFrame(
+        [
+            {
+                "id": 1,
+                "text": "Solar power distribution planning",
+                "embedding": [1.0, 0.0, 0.0],
+            },
+            {
+                "id": 2,
+                "text": "Battery storage coordination",
+                "embedding": [0.0, 1.0, 0.0],
+            },
+        ]
+    )
+    res = hybrid_search_rrf(
+        "solar distribution", df, top_k=2, query_vector=np.array([1.0, 0.0, 0.0])
+    )
+    assert not res.empty
+    assert "score" in res.columns
+    assert "dense_score" in res.columns
+    assert "bm25_score" in res.columns
