@@ -55,7 +55,7 @@ Doing this manually from raw publisher exports presents severe methodological ro
 
 The pipeline implements a 6-tier Medallion architecture orchestrated by Apache Airflow and managed through SQLAlchemy 2.0 declarative models:
 
-![Pipeline architecture: IEEE Xplore and Elsevier/ScienceDirect flowing through the raw, bronze, silver, gold, embed, and semantic layers, orchestrated by Apache Airflow, feeding the Streamlit dashboard](docs/images/architecture.svg)
+![Pipeline architecture: IEEE Xplore, OpenAlex, and Elsevier/ScienceDirect flowing through the raw, bronze, silver, gold, embed, and semantic layers, orchestrated by Apache Airflow, feeding the 13-page Streamlit dashboard](docs/images/medallion_architecture.svg)
 
 ### Pipeline Stages
 
@@ -268,7 +268,8 @@ lake-research-map/
 │   ├── ROADMAP.md                # Strategic research & feature backlog
 │   └── images/
 │       ├── lake_research_map_hero.png # Transparent RGBA hero illustration
-│       └── architecture.svg      # Pipeline medallion architecture diagram
+│       ├── architecture.svg      # Legacy pipeline architecture diagram
+│       └── medallion_architecture.svg # Modern white-background medallion architecture diagram
 ├── scripts/git-hooks/            # Pre-commit hook shell scripts
 ├── tests/                        # 186 unit/integration tests (SQLite in-memory)
 ├── AGENTS.md                     # Universal guidelines for AI assistants
