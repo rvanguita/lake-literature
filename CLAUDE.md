@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`lake-literature` — a systematic-literature-review pipeline over bibliographic exports on the topic
+`lake-research-map` — a systematic-literature-review pipeline over bibliographic exports on the topic
 *"distribution system planning"* (electric power distribution networks). The corpus is assembled by hand from
 publisher search UIs (IEEE Xplore + Elsevier/ScienceDirect), then consolidated by a medallion pipeline
-(`src/lake_literature/`) into MySQL and explored through a Streamlit dashboard (`src/lake_literature/dashboard/`).
+(`src/lake_research_map/`) into MySQL and explored through a Streamlit dashboard (`src/lake_research_map/dashboard/`).
 
 `README.md` is the project overview; `AGENTS.md` provides universal guidelines for all AI agents;
 `docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
@@ -19,9 +19,9 @@ Managed by [uv](https://docs.astral.sh/uv/) (Python 3.13, `uv_build` backend, sr
 
 ```bash
 uv sync                                          # create/refresh .venv from uv.lock
-uv run lake-literature --stage all               # full pipeline (default stage)
-uv run lake-literature --stage <stage>           # raw | bronze | silver | gold | embed | semantic
-uv run python -m lake_literature.db.bootstrap    # create the 4 databases + tables only, no ingestion
+uv run lake-research-map --stage all             # full pipeline (default stage)
+uv run lake-research-map --stage <stage>         # raw | bronze | silver | gold | embed | semantic
+uv run python -m lake_research_map.db.bootstrap  # create the 4 databases + tables only, no ingestion
 uv run streamlit run main.py                     # dashboard at http://localhost:8501
 docker compose up -d                             # Airflow (:8080) + dashboard (:8501), both read .env
 uv run pytest                                    # full suite (in-memory SQLite, no MySQL needed)
@@ -48,8 +48,8 @@ MySQL connection settings and `AIRFLOW_BASE_URL` live in `.env` (git-ignored; se
 ### Stage graph
 
 `raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py` and each a
-1:1 Airflow DAG (`airflow/dags/lake_literature_dags.py`, thin `BashOperator` wrappers around the same CLI —
-the DAG file deliberately never imports `lake_literature`).
+1:1 Airflow DAG (`airflow/dags/lake_research_map_dags.py`, thin `BashOperator` wrappers around the same CLI —
+the DAG file deliberately never imports `lake_research_map`).
 
 - `raw` — verbatim ingestion, one table per source artifact (`ingest/raw_{csv,bib,pdfs,config}.py`).
 - `bronze` — IEEE CSV + IEEE `.bib` + Elsevier `.bib` unioned into one typed schema. The IEEE CSV is the

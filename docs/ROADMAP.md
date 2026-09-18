@@ -1,6 +1,6 @@
-# Roadmap — lake-literature
+# Roadmap — lake-research-map
 
-Improvement backlog and strategic research agenda for the `lake-literature` medallion pipeline and analytical dashboard. See [`../README.md`](../README.md) for orientation, [`PRD.md`](PRD.md) for domain motivation, and [`SDD.md`](SDD.md) for architecture.
+Improvement backlog and strategic research agenda for the `lake-research-map` medallion pipeline and analytical dashboard. See [`../README.md`](../README.md) for orientation, [`PRD.md`](PRD.md) for domain motivation, and [`SDD.md`](SDD.md) for architecture.
 
 Every measurement below reflects the active corpus on **2026-09-17** (1,831 articles, 6,235 chunks, 100% embedded).
 

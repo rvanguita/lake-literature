@@ -1,17 +1,17 @@
-# lake-literature
+# lake-research-map
 
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Tests: 186 passed](https://img.shields.io/badge/tests-186%20passed-brightgreen.svg)](tests/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![Streamlit Dashboard](https://img.shields.io/badge/dashboard-Streamlit-FF4B4B.svg)](src/lake_literature/dashboard/)
+[![Streamlit Dashboard](https://img.shields.io/badge/dashboard-Streamlit-FF4B4B.svg)](src/lake_research_map/dashboard/)
 [![Airflow Orchestration](https://img.shields.io/badge/orchestration-Apache%20Airflow-017CEE.svg)](airflow/)
-[![Database: MySQL Medallion](https://img.shields.io/badge/lake-MySQL%20Medallion-00758F.svg)](src/lake_literature/db/)
+[![Database: MySQL Medallion](https://img.shields.io/badge/lake-MySQL%20Medallion-00758F.svg)](src/lake_research_map/db/)
 [![Code Style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-![lake-literature: Medallion Data Lake & Scientometric Intelligence Platform for Electric Power Distribution System Planning](docs/images/lake_literature_hero.png)
+![lake-research-map: Medallion Data Lake & Scientometric Intelligence Platform for Electric Power Distribution System Planning](docs/images/lake_research_map_hero.png)
 
-`lake-literature` is a production-grade **Medallion Data Lake**, automated ETL pipeline, and scientometric research platform engineered for a Systematic Literature Review (SLR) on:
+`lake-research-map` is a production-grade **Medallion Data Lake**, automated ETL pipeline, and scientometric research platform engineered for a Systematic Literature Review (SLR) on:
 > **"Distribution System Planning" (Electric Power Distribution Networks)**
 
 It transforms raw, heterogeneous, and partial bibliographic search exports from **IEEE Xplore** and **Elsevier ScienceDirect** (~1,831 deduplicated articles, 6,235 text chunks) into a structured, audit-ready, RAG-enabled corpus. Without writing direct SQL queries, researchers explore deep scientometric, econometric, network, and semantic dynamics through an interactive 13-page Streamlit analytical dashboard orchestrated by Apache Airflow.
@@ -46,7 +46,7 @@ Doing this manually from raw publisher exports presents severe methodological ro
 
 1. **Heterogeneous Publisher Formats**: IEEE Xplore exports metadata CSVs alongside paginated `.bib` files and bulk PDF packages. Elsevier ScienceDirect exports paginated `.bib` files only. IEEE BibTeX exports concatenate entries without newlines or separators (`month={Feb},}@ARTICLE{...`), breaking standard parsers.
 2. **DOI Discrepancies**: Elsevier provides full URL DOIs (`https://doi.org/10.1016/...`), while IEEE provides bare DOI strings (`10.1109/...`). Without strict canonical normalization (stripping URL prefixes, trimming whitespace, and casefolding), deduplication fails.
-3. **Lexical Ambiguity (The Logistics Distraction)**: The keyword query `"distribution system planning"` is polysemous. In addition to electric power distribution networks, it matches supply-chain management, warehouse locations, and freight logistics literature (~9% of raw search results). Crude keyword exclusions risk dropping valid interdisciplinary papers; `lake-literature` solves this via **contrastive semantic screening**.
+3. **Lexical Ambiguity (The Logistics Distraction)**: The keyword query `"distribution system planning"` is polysemous. In addition to electric power distribution networks, it matches supply-chain management, warehouse locations, and freight logistics literature (~9% of raw search results). Crude keyword exclusions risk dropping valid interdisciplinary papers; `lake-research-map` solves this via **contrastive semantic screening**.
 4. **Corpus Partiality & Auditability**: Out of 1,836 ingested bronze records, 1,831 survive DOI deduplication (with zero overlap between publishers under the current search window), and 96 have associated full-text PDFs (5.2%). The pipeline captures partiality explicitly, logging every dropped row to `silver.lit_rejected` to maintain PRISMA-compliant SLR audit trails.
 
 ---
@@ -73,7 +73,7 @@ The pipeline implements a 6-tier Medallion architecture orchestrated by Apache A
 The underlying MySQL server hosts multiple discrete databases named plainly after the medallion tiers: `raw`, `bronze`, `silver`, and `gold`. These databases are shared with unrelated projects (e.g., `fastf1_results`, `personal_expenses`).
 
 > [!IMPORTANT]
-> To preserve multi-tenant isolation, `lake-literature` strictly queries and modifies tables bearing the `lit_` prefix. Non-`lit_` tables are completely ignored by migrations, queries, and automated tests.
+> To preserve multi-tenant isolation, `lake-research-map` strictly queries and modifies tables bearing the `lit_` prefix. Non-`lit_` tables are completely ignored by migrations, queries, and automated tests.
 
 ### Binary Vector Embeddings (`LargeBinary` float32)
 
@@ -85,7 +85,7 @@ Vector embeddings for RAG retrieval and manifold projections are stored directly
 
 ## 📊 Interactive Analytical Dashboard (13 Pages)
 
-The Streamlit dashboard (`src/lake_literature/dashboard/`) is partitioned into **13 dedicated pages** with **zero chart redundancy across tabs**. Visualizations dynamically adapt to both dark and light modes through transparent polar/radar styling and modern responsive containers (`width="stretch"`).
+The Streamlit dashboard (`src/lake_research_map/dashboard/`) is partitioned into **13 dedicated pages** with **zero chart redundancy across tabs**. Visualizations dynamically adapt to both dark and light modes through transparent polar/radar styling and modern responsive containers (`width="stretch"`).
 
 | Page | Portuguese Title | Analytical Scope & Dedicated Tabs |
 |---|---|---|
@@ -137,8 +137,8 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.13) and an accessible MySQL 
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/rvanguita/lake-literature.git
-cd lake-literature
+git clone https://github.com/rvanguita/lake-research-map.git
+cd lake-research-map
 
 # 2. Sync virtual environment and lockfile
 uv sync
@@ -150,22 +150,22 @@ cp .env.example .env
 
 ### Pipeline CLI Execution
 
-Run pipeline stages directly via the `lake-literature` CLI:
+Run pipeline stages directly via the `lake-research-map` CLI:
 
 ```bash
 # Execute full pipeline end-to-end (bootstraps schemas, runs all 6 stages)
-uv run lake-literature --stage all
+uv run lake-research-map --stage all
 
 # Execute discrete stages independently
-uv run lake-literature --stage raw        # Ingest raw publisher exports
-uv run lake-literature --stage bronze     # Schema harmonization + OpenAlex backfill
-uv run lake-literature --stage silver     # DOI deduplication, PDF matching, reject logging
-uv run lake-literature --stage gold       # Curated articles, chunks, telemetry
-uv run lake-literature --stage embed      # Local ONNX binary vector embeddings
-uv run lake-literature --stage semantic   # Contrastive screening, themes, projections
+uv run lake-research-map --stage raw        # Ingest raw publisher exports
+uv run lake-research-map --stage bronze     # Schema harmonization + OpenAlex backfill
+uv run lake-research-map --stage silver     # DOI deduplication, PDF matching, reject logging
+uv run lake-research-map --stage gold       # Curated articles, chunks, telemetry
+uv run lake-research-map --stage embed      # Local ONNX binary vector embeddings
+uv run lake-research-map --stage semantic   # Contrastive screening, themes, projections
 
 # Schema bootstrap & additive column migration
-uv run python -m lake_literature.db.bootstrap
+uv run python -m lake_research_map.db.bootstrap
 ```
 
 ### Streamlit Dashboard
@@ -188,7 +188,7 @@ docker compose up -d
 - **Streamlit Dashboard**: [http://localhost:8501](http://localhost:8501)
 - **Apache Airflow UI**: [http://localhost:8080](http://localhost:8080) (Default login: `admin` / `admin`)
 
-Airflow DAGs (`airflow/dags/lake_literature_dags.py`) execute stages via `BashOperator` calling `uv run lake-literature --stage <stage>`. Pipeline logic runs identically whether triggered via CLI, Streamlit UI, or Airflow REST API.
+Airflow DAGs (`airflow/dags/lake_research_map_dags.py`) execute stages via `BashOperator` calling `uv run lake-research-map --stage <stage>`. Pipeline logic runs identically whether triggered via CLI, Streamlit UI, or Airflow REST API.
 
 ---
 
@@ -224,8 +224,8 @@ pre-commit install
 ## 📂 Project Directory Structure
 
 ```
-lake-literature/
-├── src/lake_literature/
+lake-research-map/
+├── src/lake_research_map/
 │   ├── config.py                 # Pydantic environment & database configuration
 │   ├── pipeline.py               # Medallion CLI controller (run_raw, run_bronze, etc.)
 │   ├── db/                       # SQLAlchemy 2.0 multi-database models
@@ -261,13 +261,13 @@ lake-literature/
 │       ├── airflow_client.py     # Airflow REST API client
 │       └── pages/                # 13 modular, deduplicated analytical controllers
 ├── airflow/                      # Airflow DAGs mirroring CLI pipeline stages
-│   └── dags/lake_literature_dags.py
+│   └── dags/lake_research_map_dags.py
 ├── docs/                         # Architecture, product specs, and assets
 │   ├── PRD.md                    # Product Requirements Document
 │   ├── SDD.md                    # System Design Document
 │   ├── ROADMAP.md                # Strategic research & feature backlog
 │   └── images/
-│       ├── lake_literature_hero.png # Transparent RGBA hero illustration
+│       ├── lake_research_map_hero.png # Transparent RGBA hero illustration
 │       └── architecture.svg      # Pipeline medallion architecture diagram
 ├── scripts/git-hooks/            # Pre-commit hook shell scripts
 ├── tests/                        # 186 unit/integration tests (SQLite in-memory)

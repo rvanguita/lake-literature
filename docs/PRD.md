@@ -1,4 +1,4 @@
-# Product Requirements Document — lake-literature
+# Product Requirements Document — lake-research-map
 
 See [`../README.md`](../README.md) for a quick orientation, [`SDD.md`](SDD.md) for how this is built, and
 [`ROADMAP.md`](ROADMAP.md) for the strategic research and improvement backlog.
@@ -115,7 +115,7 @@ Xplore and ScienceDirect search exports is unmanageable:
 
 ## 6. Functional requirements
 
-### Pipeline (CLI: `uv run lake-literature --stage <raw|bronze|silver|gold|embed|semantic|all>`)
+### Pipeline (CLI: `uv run lake-research-map --stage <raw|bronze|silver|gold|embed|semantic|all>`)
 
 - `raw`: ingest `config.csv`, IEEE CSV rows, all BibTeX entries (both sources), and the PDF inventory,
   verbatim, keyed for idempotent re-ingestion (`lit_source_files` manifest, sha256-based).
@@ -162,7 +162,7 @@ Thirteen modular pages reading from the medallion MySQL layers:
 
 ### Orchestration (Airflow, `docker compose up -d`)
 
-Seven DAGs (`lake_literature_raw/bronze/silver/gold/embed/semantic` + `lake_literature_all`), manual/API-triggered only
+Seven DAGs (`lake_research_map_raw/bronze/silver/gold/embed/semantic` + `lake_research_map_all`), manual/API-triggered only
 (no cron schedule), each task shelling out to the same CLI entrypoint used for local runs — so pipeline
 behavior is identical whether triggered locally or from Airflow. Verified with automated import tests.
 

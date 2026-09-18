@@ -1,18 +1,18 @@
-# AGENTS.md — AI Assistant Guidelines for `lake-literature`
+# AGENTS.md — AI Assistant Guidelines for `lake-research-map`
 
-This document defines the architecture, design principles, testing protocols, and development rules for AI assistants (such as Antigravity, Claude Code, Cursor, and Codex) working within the `lake-literature` codebase.
+This document defines the architecture, design principles, testing protocols, and development rules for AI assistants (such as Antigravity, Claude Code, Cursor, and Codex) working within the `lake-research-map` codebase.
 
 ---
 
 ## 1. Project Overview & Mission
 
-`lake-literature` is a production-grade **Medallion Data Lake** and analytical research platform built for a Systematic Literature Review (SLR) on the engineering topic:
+`lake-research-map` is a production-grade **Medallion Data Lake** and analytical research platform built for a Systematic Literature Review (SLR) on the engineering topic:
 > **"Distribution System Planning" (Electric Power Distribution Networks)**
 
 The corpus comprises hand-curated bibliographic exports from **IEEE Xplore** and **Elsevier ScienceDirect** (~1,831 deduplicated articles). The project provides:
-1. **Medallion Ingestion & Transform Pipeline** (`src/lake_literature/`): Multi-tier extraction, normalization, deduplication, chunking, binary vector embedding, and contrastive relevance screening.
+1. **Medallion Ingestion & Transform Pipeline** (`src/lake_research_map/`): Multi-tier extraction, normalization, deduplication, chunking, binary vector embedding, and contrastive relevance screening.
 2. **Orchestration** (`airflow/`): 1:1 Airflow DAGs mirroring CLI pipeline stages (`raw`, `bronze`, `silver`, `gold`, `embed`, `semantic`, `all`).
-3. **Interactive Analytical Dashboard** (`src/lake_literature/dashboard/`): Multipage Streamlit application featuring 13 deduplicated pages for bibliometric, scientometric, econometric, network, and semantic intelligence.
+3. **Interactive Analytical Dashboard** (`src/lake_research_map/dashboard/`): Multipage Streamlit application featuring 13 deduplicated pages for bibliometric, scientometric, econometric, network, and semantic intelligence.
 
 ---
 
@@ -59,7 +59,7 @@ The pipeline connects to a MySQL server with 4 discrete databases named plainly 
 - **`gold`**: Rebuilds `lit_articles` but **reconciles** `lit_chunks`: existing chunks with matching text keep their vector (`embedding_bin`), avoiding redundant embedding recomputation.
 - **`embed`**: Only processes chunks where `embedding_bin IS NULL`. Running twice is a zero-op.
 - **`semantic`**: Truncates and rebuilds `lit_semantics` and `lit_duplicate_pairs` atomically without modifying articles.
-- **`bootstrap`**: `src/lake_literature/db/bootstrap.py` executes before every pipeline run. Any newly introduced database column must be registered in `_ADDITIVE_COLUMNS` as nullable and additive.
+- **`bootstrap`**: `src/lake_research_map/db/bootstrap.py` executes before every pipeline run. Any newly introduced database column must be registered in `_ADDITIVE_COLUMNS` as nullable and additive.
 
 ---
 
@@ -80,7 +80,7 @@ When working on `ingest/`, `transform/`, or `loaders.py`, adhere strictly to kno
 
 ## 4. Dashboard Architecture & Streamlit Guidelines
 
-The dashboard is structured into 13 dedicated pages in `src/lake_literature/dashboard/`:
+The dashboard is structured into 13 dedicated pages in `src/lake_research_map/dashboard/`:
 
 ### 4.1 Strict Separation of Concerns
 1. **`data.py`**: Raw SQL queries returning pandas DataFrames. Must fail gracefully if tables do not exist.
@@ -134,9 +134,9 @@ The dashboard is structured into 13 dedicated pages in `src/lake_literature/dash
 uv sync                                    # Sync virtualenv from uv.lock
 
 # Pipeline Execution
-uv run lake-literature --stage all         # Execute full medallion pipeline
-uv run lake-literature --stage <stage>     # Execute single stage (raw|bronze|silver|gold|embed|semantic)
-uv run python -m lake_literature.db.bootstrap  # Bootstrap schema & additive columns
+uv run lake-research-map --stage all         # Execute full medallion pipeline
+uv run lake-research-map --stage <stage>     # Execute single stage (raw|bronze|silver|gold|embed|semantic)
+uv run python -m lake_research_map.db.bootstrap  # Bootstrap schema & additive columns
 
 # Dashboard
 uv run streamlit run main.py               # Launch Streamlit app on http://localhost:8501

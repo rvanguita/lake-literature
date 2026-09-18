@@ -1,4 +1,4 @@
-# System Design Document — lake-literature
+# System Design Document — lake-research-map
 
 See [`../README.md`](../README.md) for a quick orientation, [`PRD.md`](PRD.md) for domain motivation, and
 [`ROADMAP.md`](ROADMAP.md) for the strategic research and improvement backlog.
@@ -23,7 +23,7 @@ data/articles/──▶│ (pipeline.py)│       │              │──▶ 
   These databases are **shared with unrelated projects** on the same MySQL server (e.g. `bronze` also holds
   `fastf1_results`, `personal_expenses`); the pipeline only ever creates/touches its own `lit_`-prefixed
   tables within them. SQLAlchemy 2.0 declarative models, one `Base`/module set per layer under
-  `src/lake_literature/db/`.
+  `src/lake_research_map/db/`.
 - **Compute**: pure Python/pandas transforms, no Spark or distributed processing — the corpus is 1,831
   articles and 6,235 chunks (measured 2026-09-17), so single-process batch jobs are sufficient. Embeddings
   use local ONNX-accelerated inference (`fastembed`), and vector representations are serialized as raw
@@ -31,11 +31,11 @@ data/articles/──▶│ (pipeline.py)│       │              │──▶ 
 - **Stages**: `raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py`
   wrapped by `_record_run()` to persist execution metadata into `gold.lit_pipeline_runs`. Each stage maps
   1:1 to an Airflow DAG.
-- **Orchestration**: Apache Airflow (`airflow/dags/lake_literature_dags.py`), used purely as a scheduler/UI
+- **Orchestration**: Apache Airflow (`airflow/dags/lake_research_map_dags.py`), used purely as a scheduler/UI
   layer over the same CLI the developer runs locally — DAG tasks are `BashOperator` calls to
-  `uv run lake-literature --stage <stage>`, so pipeline logic has zero Airflow import dependency and behaves
+  `uv run lake-research-map --stage <stage>`, so pipeline logic has zero Airflow import dependency and behaves
   identically whether triggered from a terminal or from Airflow. Verified in CI via `tests/test_dag_import.py`.
-- **UI**: Streamlit multipage app (`src/lake_literature/dashboard/`), read-only against the four MySQL
+- **UI**: Streamlit multipage app (`src/lake_research_map/dashboard/`), read-only against the four MySQL
   databases except for pipeline trigger actions routed through Airflow's REST API.
 - **Deployment**: Docker Compose with two services (`dashboard`, `airflow`), see §6.
 
@@ -43,7 +43,7 @@ data/articles/──▶│ (pipeline.py)│       │              │──▶ 
 
 ### 2.1 Layer-by-layer schema
 
-**raw** (database `raw`, `src/lake_literature/db/raw_models.py`) — verbatim ingestion, one table per source
+**raw** (database `raw`, `src/lake_research_map/db/raw_models.py`) — verbatim ingestion, one table per source
 artifact type, nothing normalized or deduplicated:
 
 | Table | Purpose | Key fields |
@@ -120,7 +120,7 @@ lit_pipeline_runs     gold.lit_semantics + gold.lit_duplicate_pairs
 
 ## 3. Ingestion & transform components
 
-### `ingest/` (raw layer, `src/lake_literature/ingest/`)
+### `ingest/` (raw layer, `src/lake_research_map/ingest/`)
 
 - `raw_csv.py` — parses `data/ieee/export*.csv` into `lit_ieee_csv_rows`.
 - `raw_bib.py` — parses all `.bib` files from both sources using `bibtexparser`, handling IEEE's no-separator
@@ -131,7 +131,7 @@ lit_pipeline_runs     gold.lit_semantics + gold.lit_duplicate_pairs
 - `enrichment.py` — loads `data/enrichment_cache.json` for bronze upsert backfill.
 - `openalex.py` — automated client fetching citation and reference counts from OpenAlex REST API.
 
-### `transform/` (bronze/silver/gold/embed/semantic, `src/lake_literature/transform/`)
+### `transform/` (bronze/silver/gold/embed/semantic, `src/lake_research_map/transform/`)
 
 - `bronze_articles.py` — normalizes raw records into `bronze.lit_articles`.
 - `silver_articles.py` — dedup by DOI, sets quality flags, identifies non-articles (`_is_non_article`),
@@ -160,9 +160,9 @@ lit_pipeline_runs     gold.lit_semantics + gold.lit_duplicate_pairs
 
 ## 5. Orchestration
 
-`airflow/dags/lake_literature_dags.py` defines seven DAGs, all `schedule=None` (manual/API trigger only):
-- `lake_literature_raw/bronze/silver/gold/embed/semantic` and `lake_literature_all`.
-- Executed via `BashOperator` invoking `uv run lake-literature --stage <stage>`.
+`airflow/dags/lake_research_map_dags.py` defines seven DAGs, all `schedule=None` (manual/API trigger only):
+- `lake_research_map_raw/bronze/silver/gold/embed/semantic` and `lake_research_map_all`.
+- Executed via `BashOperator` invoking `uv run lake-research-map --stage <stage>`.
 - Client integration via `dashboard/airflow_client.py` and `dashboard/pipeline_control.py`.
 
 ## 6. Deployment topology
