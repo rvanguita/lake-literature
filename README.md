@@ -9,7 +9,7 @@
 [![Code Style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-![lake-research-map: Medallion Data Lake & Scientometric Intelligence Platform for Electric Power Distribution System Planning](docs/images/lake_research_map_hero.png)
+![lake-research-map: Medallion Data Lake & Scientometric Research Mapping Platform](docs/images/lake_research_map_hero.png)
 
 `lake-research-map` is a production-grade **Medallion Data Lake**, automated ETL pipeline, and scientometric research platform engineered for a Systematic Literature Review (SLR) on:
 > **"Distribution System Planning" (Electric Power Distribution Networks)**
