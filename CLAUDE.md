@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`lake-literature` — a systematic-literature-review pipeline over bibliographic exports on the topic
+`lake-research-map` — a systematic-literature-review pipeline over bibliographic exports on the topic
 *"distribution system planning"* (electric power distribution networks). The corpus is assembled by hand from
 publisher search UIs (IEEE Xplore + Elsevier/ScienceDirect), then consolidated by a medallion pipeline
-(`src/lake_literature/`) into MySQL and explored through a Streamlit dashboard (`src/lake_literature/dashboard/`).
+(`src/lake_research_map/`) into MySQL and explored through a Streamlit dashboard (`src/lake_research_map/dashboard/`).
 
-`README.md` is the project overview; `docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
+`README.md` is the project overview; `AGENTS.md` provides universal guidelines for all AI agents;
+`docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
 canonical reference for **source-data quirks** — the other docs cross-reference it rather than repeat it.
 
 ## Commands
@@ -18,9 +19,9 @@ Managed by [uv](https://docs.astral.sh/uv/) (Python 3.13, `uv_build` backend, sr
 
 ```bash
 uv sync                                          # create/refresh .venv from uv.lock
-uv run lake-literature --stage all               # full pipeline (default stage)
-uv run lake-literature --stage <stage>           # raw | bronze | silver | gold | embed | semantic
-uv run python -m lake_literature.db.bootstrap    # create the 4 databases + tables only, no ingestion
+uv run lake-research-map --stage all             # full pipeline (default stage)
+uv run lake-research-map --stage <stage>         # raw | bronze | silver | gold | embed | semantic
+uv run python -m lake_research_map.db.bootstrap  # create the 4 databases + tables only, no ingestion
 uv run streamlit run main.py                     # dashboard at http://localhost:8501
 docker compose up -d                             # Airflow (:8080) + dashboard (:8501), both read .env
 uv run pytest                                    # full suite (in-memory SQLite, no MySQL needed)
@@ -47,8 +48,8 @@ MySQL connection settings and `AIRFLOW_BASE_URL` live in `.env` (git-ignored; se
 ### Stage graph
 
 `raw → bronze → silver → gold → embed → semantic`, each a `run_<stage>()` in `pipeline.py` and each a
-1:1 Airflow DAG (`airflow/dags/lake_literature_dags.py`, thin `BashOperator` wrappers around the same CLI —
-the DAG file deliberately never imports `lake_literature`).
+1:1 Airflow DAG (`airflow/dags/lake_research_map_dags.py`, thin `BashOperator` wrappers around the same CLI —
+the DAG file deliberately never imports `lake_research_map`).
 
 - `raw` — verbatim ingestion, one table per source artifact (`ingest/raw_{csv,bib,pdfs,config}.py`).
 - `bronze` — IEEE CSV + IEEE `.bib` + Elsevier `.bib` unioned into one typed schema. The IEEE CSV is the
@@ -59,8 +60,11 @@ the DAG file deliberately never imports `lake_literature`).
 - `embed` — fills `lit_chunks.embedding` locally via `fastembed` (`BAAI/bge-small-en-v1.5`, ONNX, no API key).
 - `semantic` — reads those embeddings, writes `lit_semantics` + `lit_duplicate_pairs`.
 
-**`gold` truncates and rebuilds the chunks, which drops their vectors — re-running it means re-running
-`embed` and then `semantic`.**
+**`gold` rebuilds the articles table but *reconciles* the chunks: a chunk whose text is unchanged keeps its
+row and its vector, and only the chunks whose text actually changed are invalidated. (It was a plain
+delete-and-rebuild once, which silently threw away every embedding on each run — and with them the basis of
+`lit_semantics`.) So after a `gold` run, `embed` fills exactly the chunks that changed, and `semantic` has to
+be re-run either way, because it rewrites its own tables from whatever is embedded now.**
 
 ### Idempotency, per stage
 
@@ -70,7 +74,10 @@ Each stage has its own re-run contract; preserve it when editing.
 - `bronze` — upsert keyed on `(source, source_id)`; pagination duplicates within a source collapse naturally.
   Note `_upsert` writes field by field, so a `None` literal *overwrites* — that's why `ingest/enrichment.py`
   re-applies the citation/reference-count backfill after every bronze build.
-- `silver` / `gold` — delete-and-rebuild: fully derived from the layer above.
+- `silver` — delete-and-rebuild: fully derived from the layer above.
+- `gold` — articles delete-and-rebuild; chunks reconcile against the desired set (`(chunk_type, seq)` per
+  DOI), so unchanged text keeps its embedding. The run stats say how many were unchanged / invalidated /
+  added.
 - `embed` — only processes `embedding IS NULL`; running it twice is a no-op.
 - `semantic` — truncates the two tables it owns, never touches curated article rows.
 
@@ -119,9 +126,18 @@ rerun, and a module imported for its top-level side effects would only render on
 
 "Distribution system planning" is ambiguous — it also matches logistics/supply-chain papers, and roughly a
 tenth of the corpus is facility-location/cold-chain work plus book front matter ingested as articles.
-Relevance screening is a core SLR step, so every article gets a cosine score against a topic anchor
-(`transform/semantics.py::ANCHOR_TEXT`) and the dashboard lets a reviewer act on it. Nothing is auto-deleted,
-and articles with no score are never filtered out by `loaders.filter_articles`.
+Relevance screening is a core SLR step, so every article is scored against **two** anchors in
+`transform/semantics.py` — `ANCHOR_TEXT` (the review's topic) and `OFF_ANCHOR_TEXT` (the logistics reading of
+the same query) — and the screening signal is the margin between them, whose **zero is the threshold**:
+"closer to logistics than to the review's topic". A single anchor separates the two groups well (ROC AUC 0.96)
+but their score distributions overlap, so the percentile cut this used to take also discarded in-scope work;
+the margin reaches AUC 0.99 with no overlap. Nothing is auto-deleted, and articles with no score are never
+filtered out by `loaders.filter_articles`.
+
+The themes on the same page come from KMeans (`N_THEMES = 8`) and the map from t-SNE, both over the **same**
+PCA(50) space (`transform/semantics.py::reduced_space`) — sharing it is what keeps a point's color and its
+position on the map in agreement. `k` is human-chosen, not optimized: silhouette is flat across k=6..14 on
+this corpus and HDBSCAN finds only two groups (one continuum plus the logistics island).
 
 ## Data corpus (`data/`, gitignored)
 
@@ -164,7 +180,7 @@ comparing, or the same paper indexed by both publishers will survive deduplicati
 at all are dropped at silver (counted as `skipped_no_doi`, never silently).
 
 The IEEE-only fields (`countries`, `online_date`, `document_type`, `license`) carry through bronze → silver →
-gold but cover only ~17% of the corpus. **Any analysis built on them must say it covers the IEEE subset**, not
+gold but cover only the IEEE subset — 302 of 1,831 articles, 16.5%. **Any analysis built on them must say it covers the IEEE subset**, not
 the whole corpus.
 
 ### BibTeX parsing gotcha
@@ -189,8 +205,15 @@ than exact string equality — and prefer DOI-keyed renaming if a linking step i
 
 ### Counts don't line up
 
-The IEEE CSV reports ~304 search hits but the downloaded `.bib` files total ~266 entries, and only ~96 PDFs were
-retrieved. The corpus is deliberately incomplete; do not treat a count mismatch as a bug to fix in code.
+Measured on the current corpus (2026-09-17): 304 IEEE CSV rows and 1,815 BibTeX entries across both sources
+ingest to 1,836 bronze records; 1,831 survive silver's DOI deduplication (5 dropped as `skipped_no_doi`); 96
+have a PDF. The gap between search hits, downloaded entries and retrieved PDFs is a property of how the
+corpus was hand-assembled — do not treat a count mismatch as a bug to fix in code. Re-measure before quoting
+these numbers; the corpus grows whenever a new export is added.
+
+The split is also lopsided: 1,529 articles come from Elsevier and 302 from IEEE, and **no article is
+currently indexed by both** — DOI deduplication is insurance the design needs, not the dominant problem in
+this corpus. The 18 near-identical abstracts under distinct DOIs in `lit_duplicate_pairs` are.
 
 ## Conventions
 

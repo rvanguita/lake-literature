@@ -1,6 +1,7 @@
 import pandas as pd
 
-from lake_literature.dashboard.analytics import (
+from lake_research_map.dashboard.analytics import (
+    analyze_coauthorship_partners,
     author_productivity_trend,
     author_year_matrix,
     cumulative_researchers,
@@ -239,3 +240,61 @@ def test_cumulative_researchers_max_position_excludes_third_author():
     df = _multi_author_df()
     cum = cumulative_researchers(df, max_position=1)
     assert cum["total"].iloc[-1] == 3  # A, B (2020) + C (2021, as 1st author there)
+
+
+def test_analyze_coauthorship_partners_computes_network_and_global_collaborators():
+    import networkx as nx
+
+    data = [
+        {"author_display": "Junyong Liu", "doi": "10.1/1"},
+        {"author_display": "Xiaochun Zhang", "doi": "10.1/1"},
+        {"author_display": "Junyong Liu", "doi": "10.1/2"},
+        {"author_display": "Xiaochun Zhang", "doi": "10.1/2"},
+        {"author_display": "Yangyang Liu", "doi": "10.1/2"},
+        {"author_display": "Junyong Liu", "doi": "10.1/3"},
+        {"author_display": "Yangyang Liu", "doi": "10.1/3"},
+        {"author_display": "Junyong Liu", "doi": "10.1/4"},
+        {"author_display": "Yun Wei Li", "doi": "10.1/4"},
+        {"author_display": "External Author", "doi": "10.1/4"},
+        {"author_display": "Xiaochun Zhang", "doi": "10.1/5"},
+        {"author_display": "Yangyang Liu", "doi": "10.1/5"},
+    ]
+    author_rows = pd.DataFrame(data)
+
+    graph = nx.Graph()
+    graph.add_edge("Junyong Liu", "Xiaochun Zhang", weight=2)
+    graph.add_edge("Junyong Liu", "Yangyang Liu", weight=2)
+    graph.add_edge("Junyong Liu", "Yun Wei Li", weight=1)
+    graph.add_edge("Xiaochun Zhang", "Yangyang Liu", weight=2)
+
+    df = analyze_coauthorship_partners(graph, author_rows)
+    assert not df.empty
+
+    liu = df[df["author"] == "Junyong Liu"].iloc[0]
+    assert liu["articles"] == 4
+    # In network: 3 unique coauthors (Xiaochun Zhang, Yangyang Liu, Yun Wei Li)
+    assert liu["network_unique_count"] == 3
+    # 2 recurrent (weight >= 2)
+    assert liu["network_recurrent_count"] == 2
+    assert "Xiaochun Zhang (2)" in liu["network_recurrent_names"]
+    assert "Yangyang Liu (2)" in liu["network_recurrent_names"]
+    assert "Yun Wei Li" not in liu["network_recurrent_names"]
+    # 1 occasional (weight == 1)
+    assert liu["network_occasional_count"] == 1
+    assert "Yun Wei Li" in liu["network_occasional_names"]
+
+    # Global in corpus: 4 unique coauthors (including External Author)
+    assert liu["global_unique_count"] == 4
+    assert liu["global_recurrent_count"] == 2
+    assert "External Author (1)" in liu["global_top_partners"]
+
+
+def test_analyze_coauthorship_partners_handles_empty_graph():
+    import networkx as nx
+
+    graph = nx.Graph()
+    author_rows = pd.DataFrame([{"author_display": "A", "doi": "10.1/1"}])
+    df = analyze_coauthorship_partners(graph, author_rows)
+    assert df.empty
+    assert "network_unique_count" in df.columns
+    assert "global_unique_count" in df.columns

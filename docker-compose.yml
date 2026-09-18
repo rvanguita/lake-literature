@@ -33,7 +33,7 @@ services:
       # default `api_auth.jwt_issuer` is unset (None) -- without this, every
       # /auth/token (and therefore every dashboard Airflow call) 500s with
       # "Issuer (iss) must be a string."
-      AIRFLOW__API_AUTH__JWT_ISSUER: lake-literature
+      AIRFLOW__API_AUTH__JWT_ISSUER: lake-research-map
       # keep this container's uv-managed venv separate from the host's .venv
       # (its own activation scripts embed host-specific absolute paths)
       UV_PROJECT_ENVIRONMENT: /opt/venv-airflow

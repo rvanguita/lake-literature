@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from lake_literature.dashboard.forecasting import (
+from lake_research_map.dashboard.forecasting import (
     _fit_model,
     _mae,
     fit_and_forecast,
@@ -153,3 +153,29 @@ def test_yearly_counts_filters_by_source():
 
     assert counts.loc[2020] == 1
     assert counts.loc[2021] == 1
+
+
+def test_fit_bass_diffusion_nls():
+    from lake_research_map.dashboard.forecasting import fit_bass_diffusion_nls
+
+    years = np.arange(2010, 2021)
+    # S-curve adoption pattern
+    adoptions = np.array([2, 5, 12, 25, 45, 60, 55, 40, 25, 15, 8], dtype=float)
+    res = fit_bass_diffusion_nls(years, adoptions)
+
+    assert res["valid"] is True
+    assert res["m"] > 0
+    assert res["p"] > 0
+    assert res["q"] > 0
+    assert res["t_peak"] is not None
+    assert res["method"] in ("nls", "ols")
+
+
+def test_fit_and_forecast_expanding_confidence_interval():
+    s = _linear_series()
+    s.loc[2015] += 5.0
+    result = fit_and_forecast(s)
+    # Horizon 2 margin should be strictly larger than horizon 1 margin
+    margin_1 = result.forecast_upper[0] - result.forecast_values[0]
+    margin_2 = result.forecast_upper[1] - result.forecast_values[1]
+    assert margin_2 > margin_1

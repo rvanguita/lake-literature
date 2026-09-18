@@ -1,6 +1,6 @@
-from lake_literature.db.gold_models import Chunk
-from lake_literature.db.silver_models import Article as SilverArticle
-from lake_literature.transform.gold_articles import (
+from lake_research_map.db.gold_models import Chunk
+from lake_research_map.db.silver_models import Article as SilverArticle
+from lake_research_map.transform.gold_articles import (
     CHUNK_MAX_CHARS,
     CHUNK_OVERLAP_CHARS,
     _build_abstract_text,

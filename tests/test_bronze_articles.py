@@ -1,4 +1,4 @@
-from lake_literature.transform.bronze_articles import (
+from lake_research_map.transform.bronze_articles import (
     _split_bibtex_authors,
     _split_ieee_csv_authors,
     _to_int,

@@ -1,0 +1,284 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 690" width="100%" height="100%" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/>
+    </marker>
+    <filter id="shadow" x="-3%" y="-4%" width="106%" height="110%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+
+    <style>
+      .title-text { fill: #0f172a; }
+      .subtitle-text { fill: #475569; }
+      .source-bg { fill: #f8fafc; stroke: #cbd5e1; }
+      .source-title { fill: #0f172a; }
+      .source-desc { fill: #475569; }
+      .arrow-stroke { stroke: #64748b; }
+      .orchestration-box { fill: #f8fafc; stroke: #94a3b8; }
+      .orchestration-title { fill: #334155; }
+      .orchestration-desc { fill: #64748b; }
+      .dashboard-box { fill: #ffffff; stroke: #ea580c; }
+      .dashboard-header-bg { fill: #fff7ed; }
+      .dashboard-header-text { fill: #9a3412; }
+      .subpanel-box { fill: #f8fafc; stroke: #e2e8f0; }
+      .subpanel-header-bg { fill: #f1f5f9; }
+      .subpanel-header-text { fill: #1e293b; }
+      .subpanel-body { fill: #334155; }
+      .subpanel-footer { fill: #64748b; }
+
+      @media (prefers-color-scheme: dark) {
+        .title-text { fill: #f8fafc; }
+        .subtitle-text { fill: #94a3b8; }
+        .source-bg { fill: #1e293b; stroke: #334155; }
+        .source-title { fill: #f8fafc; }
+        .source-desc { fill: #94a3b8; }
+        .arrow-stroke { stroke: #94a3b8; }
+        .orchestration-box { fill: #1e293b; stroke: #475569; }
+        .orchestration-title { fill: #e2e8f0; }
+        .orchestration-desc { fill: #94a3b8; }
+        .dashboard-box { fill: #0f172a; stroke: #f97316; }
+        .dashboard-header-bg { fill: #431407; }
+        .dashboard-header-text { fill: #fdba74; }
+        .subpanel-box { fill: #1e293b; stroke: #334155; }
+        .subpanel-header-bg { fill: #0f172a; }
+        .subpanel-header-text { fill: #f8fafc; }
+        .subpanel-body { fill: #cbd5e1; }
+        .subpanel-footer { fill: #94a3b8; }
+      }
+    </style>
+  </defs>
+
+  <!-- Canvas Background: Fully Transparent (No background rect) -->
+
+  <!-- ==================== HEADER ==================== -->
+  <text x="600" y="38" text-anchor="middle" font-size="20" font-weight="800" class="title-text" letter-spacing="-0.3">lake-research-map: Medallion Architecture &amp; Analytical Pipeline</text>
+  <text x="600" y="58" text-anchor="middle" font-size="12.5" font-weight="500" class="subtitle-text">Production Data Lake &amp; Scientometric Platform for Systematic Literature Review on Distribution System Planning</text>
+
+  <!-- ==================== SOURCES LAYER ==================== -->
+  <!-- IEEE Xplore -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="74" width="310" height="58" rx="8" class="source-bg" stroke-width="1.5"/>
+    <rect x="62" y="84" width="36" height="38" rx="6" fill="#0284c7" opacity="0.15"/>
+    <text x="80" y="108" text-anchor="middle" font-size="16">📄</text>
+    <text x="110" y="97" font-size="14" font-weight="700" class="source-title">IEEE Xplore</text>
+    <text x="110" y="116" font-size="11" class="source-desc">CSV metadata exports (authoritative), .bib, PDFs</text>
+  </g>
+
+  <!-- OpenAlex REST API -->
+  <g filter="url(#shadow)">
+    <rect x="445" y="74" width="310" height="58" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+    <rect x="457" y="84" width="36" height="38" rx="6" fill="#16a34a" opacity="0.15"/>
+    <text x="475" y="108" text-anchor="middle" font-size="16">🌐</text>
+    <text x="505" y="97" font-size="14" font-weight="700" fill="#15803d">OpenAlex REST API</text>
+    <text x="505" y="116" font-size="11" fill="#166534">Automated citation &amp; reference count enrichment</text>
+  </g>
+
+  <!-- Elsevier / ScienceDirect -->
+  <g filter="url(#shadow)">
+    <rect x="840" y="74" width="310" height="58" rx="8" class="source-bg" stroke-width="1.5"/>
+    <rect x="852" y="84" width="36" height="38" rx="6" fill="#ea580c" opacity="0.15"/>
+    <text x="870" y="108" text-anchor="middle" font-size="16">📚</text>
+    <text x="900" y="97" font-size="14" font-weight="700" class="source-title">Elsevier / ScienceDirect</text>
+    <text x="900" y="116" font-size="11" class="source-desc">BibTeX bibliographic search exports</text>
+  </g>
+
+  <!-- Source Ingestion Flow Arrows -->
+  <path d="M205,132 L205,154 L125,154 L125,174" fill="none" class="arrow-stroke" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M600,132 L600,154 L315,154 L315,174" fill="none" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <path d="M995,132 L995,154 L125,154" fill="none" class="arrow-stroke" stroke-width="1.5"/>
+
+  <!-- ==================== MEDALLION PIPELINE (6 STAGES) ==================== -->
+
+  <!-- STAGE 1: RAW -->
+  <g filter="url(#shadow)">
+    <rect x="41" y="176" width="168" height="175" rx="8" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/>
+    <path d="M42,177 L208,177 A7,7 0 0 1 208,208 L42,208 Z" fill="#d1fae5"/>
+    <text x="125" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#065f46">1. RAW</text>
+    <text x="125" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#047857">Verbatim Ingest</text>
+    <text x="54" y="244" font-size="10.5" fill="#065f46">• SHA-256 manifest</text>
+    <text x="54" y="261" font-size="10.5" fill="#065f46">• Raw CSV, .bib &amp; PDFs</text>
+    <text x="54" y="278" font-size="10.5" fill="#065f46">• Zero data mutation</text>
+    <text x="54" y="295" font-size="10.5" fill="#065f46">• Exact source history</text>
+    <!-- Table Badge -->
+    <rect x="52" y="314" width="146" height="24" rx="4" fill="#a7f3d0" stroke="#059669" stroke-width="1"/>
+    <text x="125" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#064e3b">lit_source_files • 5 tables</text>
+  </g>
+
+  <!-- Arrow Raw -> Bronze -->
+  <path d="M209,263 L229,263" fill="none" class="arrow-stroke" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- STAGE 2: BRONZE -->
+  <g filter="url(#shadow)">
+    <rect x="231" y="176" width="168" height="175" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+    <path d="M232,177 L398,177 A7,7 0 0 1 398,208 L232,208 Z" fill="#fef3c7"/>
+    <text x="315" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#92400e">2. BRONZE</text>
+    <text x="315" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#b45309">Harmonization</text>
+    <text x="244" y="244" font-size="10.5" fill="#92400e">• Typed article union</text>
+    <text x="244" y="261" font-size="10.5" fill="#92400e">• Natural key upsert</text>
+    <text x="244" y="278" font-size="10.5" fill="#92400e">• Pagination dedup</text>
+    <text x="244" y="295" font-size="10.5" fill="#92400e">• OpenAlex citation backfill</text>
+    <!-- Table Badge -->
+    <rect x="242" y="314" width="146" height="24" rx="4" fill="#fde68a" stroke="#d97706" stroke-width="1"/>
+    <text x="315" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#78350f">lit_articles (unioned)</text>
+  </g>
+
+  <!-- Arrow Bronze -> Silver -->
+  <path d="M399,263 L419,263" fill="none" class="arrow-stroke" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- STAGE 3: SILVER -->
+  <g filter="url(#shadow)">
+    <rect x="421" y="176" width="168" height="175" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    <path d="M422,177 L588,177 A7,7 0 0 1 588,208 L422,208 Z" fill="#dbeafe"/>
+    <text x="505" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#1e40af">3. SILVER</text>
+    <text x="505" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1d4ed8">Clean &amp; Deduplicate</text>
+    <text x="434" y="244" font-size="10.5" fill="#1e40af">• Normalized DOI dedup</text>
+    <text x="434" y="261" font-size="10.5" fill="#1e40af">• Quality &amp; is_non_article</text>
+    <text x="434" y="278" font-size="10.5" fill="#1e40af">• Fuzzy PDF match ≥85%</text>
+    <text x="434" y="295" font-size="10.5" fill="#1e40af">• SLR audit: lit_rejected</text>
+    <!-- Table Badge -->
+    <rect x="432" y="314" width="146" height="24" rx="4" fill="#bfdbfe" stroke="#2563eb" stroke-width="1"/>
+    <text x="505" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#1e3a8a">lit_articles • lit_rejected</text>
+  </g>
+
+  <!-- Arrow Silver -> Gold -->
+  <path d="M589,263 L609,263" fill="none" class="arrow-stroke" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- STAGE 4: GOLD -->
+  <g filter="url(#shadow)">
+    <rect x="611" y="176" width="168" height="175" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/>
+    <path d="M612,177 L778,177 A7,7 0 0 1 778,208 L612,208 Z" fill="#ffe4e6"/>
+    <text x="695" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#9f1239">4. GOLD</text>
+    <text x="695" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#be123c">Curated RAG Units</text>
+    <text x="624" y="244" font-size="10.5" fill="#9f1239">• Curated papers (1,831)</text>
+    <text x="624" y="261" font-size="10.5" fill="#9f1239">• Reconciled chunks</text>
+    <text x="624" y="278" font-size="10.5" fill="#9f1239">• Abstract + full-text RAG</text>
+    <text x="624" y="295" font-size="10.5" fill="#9f1239">• lit_pipeline_runs trace</text>
+    <!-- Table Badge -->
+    <rect x="622" y="314" width="146" height="24" rx="4" fill="#fecdd3" stroke="#e11d48" stroke-width="1"/>
+    <text x="695" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#881337">lit_articles • lit_chunks</text>
+  </g>
+
+  <!-- Arrow Gold -> Embed -->
+  <path d="M779,263 L799,263" fill="none" class="arrow-stroke" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- STAGE 5: EMBED -->
+  <g filter="url(#shadow)">
+    <rect x="801" y="176" width="168" height="175" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+    <path d="M802,177 L968,177 A7,7 0 0 1 968,208 L802,208 Z" fill="#ede9fe"/>
+    <text x="885" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#5b21b6">5. EMBED</text>
+    <text x="885" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6d28d9">Vector Inference</text>
+    <text x="814" y="244" font-size="10.5" fill="#5b21b6">• Local FastEmbed ONNX</text>
+    <text x="814" y="261" font-size="10.5" fill="#5b21b6">• BAAI/bge-small-en-v1.5</text>
+    <text x="814" y="278" font-size="10.5" fill="#5b21b6">• 384 dimensions</text>
+    <text x="814" y="295" font-size="10.5" fill="#5b21b6">• Zero API dependency</text>
+    <!-- Table Badge -->
+    <rect x="812" y="314" width="146" height="24" rx="4" fill="#ddd6fe" stroke="#7c3aed" stroke-width="1"/>
+    <text x="885" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#4c1d95">embedding_bin (float32)</text>
+  </g>
+
+  <!-- Arrow Embed -> Semantic -->
+  <path d="M969,263 L989,263" fill="none" class="arrow-stroke" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- STAGE 6: SEMANTIC -->
+  <g filter="url(#shadow)">
+    <rect x="991" y="176" width="168" height="175" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+    <path d="M992,177 L1158,177 A7,7 0 0 1 1158,208 L992,208 Z" fill="#e0f2fe"/>
+    <text x="1075" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#0369a1">6. SEMANTIC</text>
+    <text x="1075" y="224" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0284c7">Relevance &amp; Maps</text>
+    <text x="1004" y="244" font-size="10.5" fill="#0369a1">• Contrastive margin cut</text>
+    <text x="1004" y="261" font-size="10.5" fill="#0369a1">• KMeans 8 cluster themes</text>
+    <text x="1004" y="278" font-size="10.5" fill="#0369a1">• PCA-50 + t-SNE / UMAP</text>
+    <text x="1004" y="295" font-size="10.5" fill="#0369a1">• Near-duplicate detection</text>
+    <!-- Table Badge -->
+    <rect x="1002" y="314" width="146" height="24" rx="4" fill="#bae6fd" stroke="#0284c7" stroke-width="1"/>
+    <text x="1075" y="330" text-anchor="middle" font-size="10" font-weight="700" fill="#075985">lit_semantics • pairs</text>
+  </g>
+
+  <!-- ==================== ORCHESTRATION LAYER ==================== -->
+  <g>
+    <!-- Orchestration Bracket & Container -->
+    <rect x="41" y="366" width="1118" height="50" rx="8" class="orchestration-box" stroke-width="1.2" stroke-dasharray="5 4"/>
+    <!-- Stage indicator marks -->
+    <circle cx="125" cy="366" r="3" fill="#10b981"/>
+    <circle cx="315" cy="366" r="3" fill="#f59e0b"/>
+    <circle cx="505" cy="366" r="3" fill="#3b82f6"/>
+    <circle cx="695" cy="366" r="3" fill="#f43f5e"/>
+    <circle cx="885" cy="366" r="3" fill="#8b5cf6"/>
+    <circle cx="1075" cy="366" r="3" fill="#0ea5e9"/>
+
+    <text x="600" y="387" text-anchor="middle" font-size="12.5" font-weight="700" class="orchestration-title">
+      ⚙️ Apache Airflow 3.x Orchestration — 6 Stage DAGs + 1 Chained Master Flow (<tspan font-family="monospace" font-size="11">airflow/dags/lake_research_map_dags.py</tspan>)
+    </text>
+    <text x="600" y="404" text-anchor="middle" font-size="11" class="orchestration-desc">
+      Dual execution paths: <tspan font-family="monospace" font-weight="600">uv run lake-research-map --stage &lt;stage&gt;</tspan> (CLI) • Interactive DAG triggers via Airflow REST API
+    </text>
+  </g>
+
+  <!-- Flow Downward to Dashboard -->
+  <path d="M600,416 L600,444" fill="none" stroke="#ea580c" stroke-width="2" marker-end="url(#arrow-orange)"/>
+
+  <!-- ==================== DASHBOARD LAYER (13 PAGES) ==================== -->
+  <g filter="url(#shadow)">
+    <!-- Dashboard Container -->
+    <rect x="41" y="448" width="1118" height="220" rx="10" class="dashboard-box" stroke-width="1.8"/>
+    <!-- Header Banner -->
+    <path d="M42,449 L1158,449 A9,9 0 0 1 1158,484 L42,484 Z" class="dashboard-header-bg"/>
+    <text x="600" y="472" text-anchor="middle" font-size="14.5" font-weight="800" class="dashboard-header-text" letter-spacing="-0.2">
+      📊 Interactive Streamlit Analytical Research Dashboard (13 Specialized Pages — Zero Chart Redundancy)
+    </text>
+
+    <!-- Sub-Panel 1: Bibliometrics & Econometrics -->
+    <rect x="55" y="494" width="262" height="160" rx="6" class="subpanel-box" stroke-width="1"/>
+    <rect x="55" y="494" width="262" height="26" rx="6" class="subpanel-header-bg"/>
+    <text x="186" y="512" text-anchor="middle" font-size="11.5" font-weight="700" class="subpanel-header-text">Bibliometrics &amp; Econometrics</text>
+    <text x="67" y="536" font-size="10.5" class="subpanel-body">• Annual volume &amp; CAGR growth</text>
+    <text x="67" y="553" font-size="10.5" class="subpanel-body">• Bradford zones &amp; Zipf's law</text>
+    <text x="67" y="570" font-size="10.5" class="subpanel-body">• Heavy-tail MLE citation fit</text>
+    <text x="67" y="587" font-size="10.5" class="subpanel-body">• Poisson regression determinants</text>
+    <text x="67" y="604" font-size="10.5" class="subpanel-body">• CAPES/Qualis strata grading</text>
+    <text x="67" y="621" font-size="10.5" class="subpanel-body">• Author careers: h, g, e-index &amp; m</text>
+    <text x="67" y="638" font-size="10" font-weight="600" class="subpanel-footer">Pages: production, topics, highlights</text>
+
+    <!-- Sub-Panel 2: Methodological Synthesis -->
+    <rect x="331" y="494" width="262" height="160" rx="6" class="subpanel-box" stroke-width="1"/>
+    <rect x="331" y="494" width="262" height="26" rx="6" class="subpanel-header-bg"/>
+    <text x="462" y="512" text-anchor="middle" font-size="11.5" font-weight="700" class="subpanel-header-text">Methodological Synthesis</text>
+    <text x="343" y="536" font-size="10.5" class="subpanel-body">• 8 engineering optimization tabs</text>
+    <text x="343" y="553" font-size="10.5" class="subpanel-body">• MILP, SOCP, MINLP &amp; AI complexity</text>
+    <text x="343" y="570" font-size="10.5" class="subpanel-body">• Multi-objective co-optimization</text>
+    <text x="343" y="587" font-size="10.5" class="subpanel-body">• Uncertainty modeling vs DERs</text>
+    <text x="343" y="604" font-size="10.5" class="subpanel-body">• IEEE benchmark test feeders</text>
+    <text x="343" y="621" font-size="10.5" class="subpanel-body">• Solvers: GAMS, CPLEX, OpenDSS</text>
+    <text x="343" y="638" font-size="10" font-weight="600" class="subpanel-footer">Pages: synthesis, researchers</text>
+
+    <!-- Sub-Panel 3: Frontiers & Disruption -->
+    <rect x="607" y="494" width="262" height="160" rx="6" class="subpanel-box" stroke-width="1"/>
+    <rect x="607" y="494" width="262" height="26" rx="6" class="subpanel-header-bg"/>
+    <text x="738" y="512" text-anchor="middle" font-size="11.5" font-weight="700" class="subpanel-header-text">Frontiers &amp; Disruption</text>
+    <text x="619" y="536" font-size="10.5" class="subpanel-body">• 5 innovation &amp; temporal tabs</text>
+    <text x="619" y="553" font-size="10.5" class="subpanel-body">• Price's index (theoretical youth)</text>
+    <text x="619" y="570" font-size="10.5" class="subpanel-body">• Sleeping Beauties (B coefficient)</text>
+    <text x="619" y="587" font-size="10.5" class="subpanel-body">• CD disruption index (Nature 2019)</text>
+    <text x="619" y="604" font-size="10.5" class="subpanel-body">• Open Access Citation Advantage</text>
+    <text x="619" y="621" font-size="10.5" class="subpanel-body">• Kleinberg burst detection</text>
+    <text x="619" y="638" font-size="10" font-weight="600" class="subpanel-footer">Pages: frontiers, strategic, forecasting</text>
+
+    <!-- Sub-Panel 4: Semantics & Hybrid RAG -->
+    <rect x="883" y="494" width="262" height="160" rx="6" class="subpanel-box" stroke-width="1"/>
+    <rect x="883" y="494" width="262" height="26" rx="6" class="subpanel-header-bg"/>
+    <text x="1014" y="512" text-anchor="middle" font-size="11.5" font-weight="700" class="subpanel-header-text">Semantic Space &amp; Search</text>
+    <text x="895" y="536" font-size="10.5" class="subpanel-body">• Contrastive screening distribution</text>
+    <text x="895" y="553" font-size="10.5" class="subpanel-body">• 2D projections: t-SNE, UMAP, PCA</text>
+    <text x="895" y="570" font-size="10.5" class="subpanel-body">• Thematic drift across epochs</text>
+    <text x="895" y="587" font-size="10.5" class="subpanel-body">• Hybrid BM25 Okapi + dense RRF</text>
+    <text x="895" y="604" font-size="10.5" class="subpanel-body">• Duplicate abstract pair auditor</text>
+    <text x="895" y="621" font-size="10.5" class="subpanel-body">• Stratified screening calibration</text>
+    <text x="895" y="638" font-size="10" font-weight="600" class="subpanel-footer">Pages: semantics, quality, search</text>
+  </g>
+</svg>

@@ -6,9 +6,12 @@ error anywhere -- which is exactly how three charts shipped unlabelled. These
 assert the titles survive all the way onto the figure.
 """
 
-import pandas as pd
+from unittest.mock import MagicMock, patch
 
-from lake_literature.dashboard.charts import (
+import pandas as pd
+import plotly.graph_objects as go
+
+from lake_research_map.dashboard.charts import (
     lorenz_chart,
     source_bars,
     source_lines,
@@ -16,6 +19,7 @@ from lake_literature.dashboard.charts import (
     stacked_area,
     topn_hbar,
 )
+from lake_research_map.dashboard.components import _warn_unnamed_axes, metric_row
 
 
 def _by_source() -> pd.DataFrame:
@@ -108,3 +112,44 @@ def test_lorenz_chart_names_both_axes_without_being_asked() -> None:
         "Parcela acumulada de periódicos",
         "Parcela acumulada de artigos",
     )
+
+
+def test_warn_unnamed_axes_exempts_scatterpolar(caplog) -> None:
+    fig = go.Figure(data=go.Scatterpolar(r=[1, 2, 3], theta=["A", "B", "C"]))
+    with caplog.at_level("WARNING"):
+        _warn_unnamed_axes(fig)
+    assert not any("chart axis without a title" in r.message for r in caplog.records)
+
+
+def test_warn_unnamed_axes_flags_unlabelled_cartesian(caplog) -> None:
+    fig = go.Figure(data=go.Scatter(x=[1, 2], y=[3, 4]))
+    with caplog.at_level("WARNING"):
+        _warn_unnamed_axes(fig)
+    assert any("chart axis without a title: xaxis" in r.message for r in caplog.records)
+
+
+def test_warn_unnamed_axes_heatmaps_fallback(caplog) -> None:
+    fig = go.Figure(data=go.Heatmap(z=[[1, 2], [3, 4]]))
+    with caplog.at_level("WARNING"):
+        _warn_unnamed_axes(fig)
+    assert not any("chart axis without a title" in r.message for r in caplog.records)
+    assert fig.layout.xaxis.title.text == "Dimensão X"
+    assert fig.layout.yaxis.title.text == "Dimensão Y"
+
+
+def test_metric_row_accepts_both_2_and_3_tuples() -> None:
+    mock_container = MagicMock()
+    mock_col1 = MagicMock()
+    mock_col2 = MagicMock()
+    with (
+        patch("streamlit.container", return_value=mock_container),
+        patch("streamlit.columns", return_value=[mock_col1, mock_col2]),
+    ):
+        metric_row(
+            [
+                ("Taxa", "50%"),
+                ("Score", "9.5", "+1.2"),
+            ]
+        )
+        mock_col1.metric.assert_called_once_with("Taxa", "50%", None)
+        mock_col2.metric.assert_called_once_with("Score", "9.5", "+1.2")
