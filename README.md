@@ -267,10 +267,13 @@ lake-research-map/
 │   ├── SDD.md                    # System Design Document
 │   ├── ROADMAP.md                # Strategic research & feature backlog
 │   └── images/
-│       ├── lake_research_map_hero.png # Transparent RGBA hero illustration
+│       ├── lake_research_map_hero.png # High-resolution hero illustration (white background)
+│       ├── lake_research_map_hero.svg # Vector source for hero illustration
 │       ├── architecture.svg      # Legacy pipeline architecture diagram
 │       └── medallion_architecture.svg # Modern white-background medallion architecture diagram
-├── scripts/git-hooks/            # Pre-commit hook shell scripts
+├── scripts/
+│   ├── generate_hero.py          # Programmatic vector renderer for hero assets
+│   └── git-hooks/                # Pre-commit hook shell scripts
 ├── tests/                        # 186 unit/integration tests (SQLite in-memory)
 ├── AGENTS.md                     # Universal guidelines for AI assistants
 ├── CLAUDE.md                     # Source-data quirks and environment notes
