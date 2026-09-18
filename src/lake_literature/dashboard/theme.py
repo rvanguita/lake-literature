@@ -110,6 +110,11 @@ _DARK_TOKENS = {
     # into chart_bg (#0b1725), which the previous near-identical rgba did.
     "legend_bg": "rgba(18, 78, 140, 0.55)",
     "legend_border": "rgba(94, 169, 255, 0.35)",
+    "heatmap_zero": "#0b1725",
+    "heatmap_mid": "#0b1725",
+    "reference_line": "rgba(255, 255, 255, 0.75)",
+    "reference_line_subtle": "rgba(255, 255, 255, 0.35)",
+    "point_border": "#ffffff",
 }
 
 _LIGHT_TOKENS = {
@@ -143,6 +148,11 @@ _LIGHT_TOKENS = {
     "axis_line": "rgba(15,23,42,0.22)",
     "legend_bg": "rgba(255,255,255,0.88)",
     "legend_border": "rgba(15,23,42,0.14)",
+    "heatmap_zero": "#f1f5f9",
+    "heatmap_mid": "#ffffff",
+    "reference_line": "rgba(15, 23, 42, 0.65)",
+    "reference_line_subtle": "rgba(15, 23, 42, 0.25)",
+    "point_border": "#0b1725",
 }
 
 
@@ -467,6 +477,19 @@ def _figure_template(theme_type: str, has_title: bool):
         colorway=CATEGORICAL_PALETTE,
         xaxis=axis,
         yaxis=axis,
+        polar=dict(
+            bgcolor=CHART_PAPER_BG,
+            radialaxis=dict(
+                gridcolor=t["grid"],
+                linecolor=t["axis_line"],
+                tickfont=dict(color=t["chart_tick"]),
+            ),
+            angularaxis=dict(
+                gridcolor=t["grid"],
+                linecolor=t["axis_line"],
+                tickfont=dict(color=t["chart_text"]),
+            ),
+        ),
         legend=dict(
             orientation="h",
             yanchor="top",
@@ -503,7 +526,7 @@ def _figure_template(theme_type: str, has_title: bool):
     return go.layout.Template(base).update(layout=layout)
 
 
-def polish_figure_layout(fig, height: int | None = None) -> None:
+def polish_figure_layout(fig, height: int | None = None, margin: dict | None = None) -> None:
     """Apply the unified light/dark chart styling to `fig`, in place."""
     t = _tokens()
     has_title = bool(fig.layout.title and fig.layout.title.text)
@@ -532,9 +555,10 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
     # (which follows the browser/system setting, not our sidebar toggle) and
     # every chart rendered as a black slab. Spelling them out on the figure is
     # what makes the dashboard's own theme win.
+    default_margin = dict(l=40, r=40, t=105 if has_title else 55, b=40)
     fig.update_layout(
         template=_figure_template(_active_theme_type(), has_title),
-        margin=dict(l=40, r=40, t=105 if has_title else 55, b=40),
+        margin=margin or default_margin,
         paper_bgcolor=CHART_PAPER_BG,
         plot_bgcolor=CHART_PAPER_BG,
         font=dict(family=_CHART_FONT_FAMILY, size=12, color=t["chart_text"]),
@@ -543,7 +567,13 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
     # `annotationdefaults`, so they still need an explicit pass.
     fig.update_annotations(font=dict(weight="bold", color=t["chart_annotation"]))
     try:
-        fig.update_traces(textfont=dict(weight="bold", color=t["chart_annotation"]))
+        # Don't force a single textfont color onto heatmap cells so Plotly's
+        # intelligent text_auto per-cell contrast (black on light, white on dark)
+        # continues to operate cleanly in both themes.
+        fig.update_traces(
+            selector=lambda tr: getattr(tr, "type", None) != "heatmap",
+            textfont=dict(weight="bold", color=t["chart_annotation"]),
+        )
     except Exception:
         # Not every trace type accepts a bold textfont weight; this is a
         # cosmetic best-effort, not a correctness concern.
@@ -552,3 +582,23 @@ def polish_figure_layout(fig, height: int | None = None) -> None:
         )
     if height:
         fig.update_layout(height=height)
+
+    is_polar = (hasattr(fig.layout, "polar") and fig.layout.polar is not None) or any(
+        getattr(tr, "type", None) in ("scatterpolar", "barpolar") for tr in fig.data
+    )
+    if is_polar:
+        fig.update_layout(
+            polar=dict(
+                bgcolor=CHART_PAPER_BG,
+                radialaxis=dict(
+                    gridcolor=t["grid"],
+                    linecolor=t["axis_line"],
+                    tickfont=dict(color=t["chart_tick"]),
+                ),
+                angularaxis=dict(
+                    gridcolor=t["grid"],
+                    linecolor=t["axis_line"],
+                    tickfont=dict(color=t["chart_text"]),
+                ),
+            )
+        )

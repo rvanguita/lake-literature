@@ -61,8 +61,14 @@ def render() -> None:
         st.warning("Nenhum dado disponível ainda. Execute o pipeline e recarregue esta página.")
         return
 
-    tab_total, tab_ieee, tab_elsevier, tab_keywords = st.tabs(
-        ["🌐 Total", "🔷 IEEE", "🟠 Elsevier", "🏷️ Tópicos em Alta"]
+    tab_total, tab_ieee, tab_elsevier, tab_keywords, tab_bass = st.tabs(
+        [
+            "🌐 Total",
+            "🔷 IEEE",
+            "🟠 Elsevier",
+            "🏷️ Tópicos em Alta",
+            "📊 Difusão Tecnológica (Bass)",
+        ]
     )
     for tab, label, source, color in (
         (tab_total, "Total", None, TOTAL_COLOR),
@@ -74,6 +80,9 @@ def render() -> None:
 
     with tab_keywords:
         _keyword_growth_ranking()
+
+    with tab_bass:
+        _bass_diffusion_analysis()
 
 
 @st.cache_data(ttl=60)
@@ -378,3 +387,49 @@ def _keyword_growth_ranking() -> None:
 
     with st.expander("📋 Tabela completa de tópicos avaliados"):
         st.dataframe(ranking.reset_index(drop=True), hide_index=True, width="stretch")
+
+
+def _bass_diffusion_analysis() -> None:
+    st.subheader("📊 Modelo de Difusão de Bass para Tecnologias Emergentes")
+    st.caption(
+        "O Modelo de Difusão de Bass (1969) modela o ciclo de adoção de inovações tecnológicas, "
+        "separando a influência externa de inovadores (p) da influência de contágio/imitação interna (q). "
+        "Permite estimar a capacidade de saturação teórica (m) e o ano de pico de publicações (t*)."
+    )
+    from lake_literature.dashboard.forecasting import fit_bass_diffusion_nls
+
+    status, rows, results_by_keyword, _ = _keyword_forecasts()
+    if status != "ok" or not results_by_keyword:
+        st.info("Palavras-chave insuficientes para o modelo de difusão.")
+        return
+
+    bass_records = []
+    for kw, f_res in results_by_keyword.items():
+        hist = f_res.history
+        years = hist.index.to_numpy()
+        adoptions = hist.values
+        bass = fit_bass_diffusion_nls(years, adoptions)
+        if bass.get("valid"):
+            bass_records.append(
+                {
+                    "Tecnologia / Tópico": kw,
+                    "Estágio Atual": bass["stage"].title(),
+                    "Método": bass.get("method", "nls").upper(),
+                    "Coef. Inovação (p)": round(bass["p"], 4),
+                    "Coef. Imitação (q)": round(bass["q"], 4),
+                    "Potencial de Saturação (m)": int(round(bass["m"])),
+                    "Ano de Pico Estimado": (int(round(bass["t_peak"])) if bass["t_peak"] else "—"),
+                }
+            )
+
+    if bass_records:
+        st.dataframe(pd.DataFrame(bass_records), hide_index=True, width="stretch")
+        st.caption(
+            "Ajuste contínuo não-linear (NLS via `scipy.optimize.curve_fit`) com limites físicos de capacidade. "
+            "Tópicos em estágio de 'Crescimento' ainda não atingiram o ápice de produção científica; "
+            "tópicos em 'Maturidade' já ultrapassaram o ano de pico estimado e tendem à estabilização."
+        )
+    else:
+        st.info(
+            "Nenhum tópico com histórico suficiente para convergência estável do modelo de Bass."
+        )

@@ -236,6 +236,109 @@ def project_2d(matrix: np.ndarray) -> np.ndarray:
     return projection.astype("float32")
 
 
+def project_pca_2d(matrix: np.ndarray) -> np.ndarray:
+    """Project matrix to 2D using PCA for a linear orthogonal perspective."""
+    from sklearn.decomposition import PCA
+
+    n_samples = len(matrix)
+    if n_samples < 2:
+        return np.zeros((n_samples, 2), dtype="float32")
+    n_components = min(2, n_samples, matrix.shape[1] if matrix.ndim > 1 else 1)
+    if n_components < 2:
+        coords = np.zeros((n_samples, 2), dtype="float32")
+        if n_components == 1:
+            coords[:, 0] = PCA(n_components=1).fit_transform(matrix).ravel()
+        return coords
+    return PCA(n_components=2, random_state=RANDOM_SEED).fit_transform(matrix).astype("float32")
+
+
+def project_umap(matrix: np.ndarray, n_neighbors: int = 15, min_dist: float = 0.1) -> np.ndarray:
+    """Project embeddings to 2D via UMAP, preserving both local and global topology.
+
+    Falls back to PCA if `umap-learn` is not available in the environment.
+    """
+    n_samples = len(matrix)
+    if n_samples < 3:
+        return np.zeros((n_samples, 2), dtype="float32")
+    try:
+        import umap
+
+        effective_neighbors = min(n_neighbors, max(2, n_samples - 1))
+        reducer = umap.UMAP(
+            n_components=2,
+            n_neighbors=effective_neighbors,
+            min_dist=min_dist,
+            metric="cosine",
+            random_state=RANDOM_SEED,
+        )
+        return reducer.fit_transform(matrix).astype("float32")
+    except ImportError:
+        return project_pca_2d(matrix)
+
+
+def compute_thematic_centroids(matrix: np.ndarray, labels: np.ndarray) -> dict[int, np.ndarray]:
+    """Compute the 2D centroid (mean coordinate) for each theme."""
+    centroids: dict[int, np.ndarray] = {}
+    for label in np.unique(labels):
+        mask = labels == label
+        if np.any(mask):
+            centroids[int(label)] = np.mean(matrix[mask], axis=0).astype("float32")
+    return centroids
+
+
+def compute_temporal_drift(
+    coords_2d: np.ndarray,
+    labels: np.ndarray,
+    years: np.ndarray,
+    windows: list[tuple[int, int]],
+) -> dict[int, list[dict]]:
+    """Track movement of thematic centroids across chronological windows.
+
+    Returns a dictionary mapping theme_id to a list of dicts with:
+    {'window': (start, end), 'name': 'start-end', 'x': float, 'y': float, 'count': int}
+    """
+    drift: dict[int, list[dict]] = {int(label): [] for label in np.unique(labels)}
+    for start_yr, end_yr in windows:
+        window_mask = (years >= start_yr) & (years <= end_yr)
+        window_labels = labels[window_mask]
+        window_coords = coords_2d[window_mask]
+
+        for theme_id in drift:
+            theme_mask = window_labels == theme_id
+            if np.any(theme_mask):
+                c = np.mean(window_coords[theme_mask], axis=0)
+                drift[theme_id].append(
+                    {
+                        "window": (start_yr, end_yr),
+                        "name": f"{start_yr}–{end_yr}",
+                        "x": float(c[0]),
+                        "y": float(c[1]),
+                        "count": int(np.sum(theme_mask)),
+                    }
+                )
+    return drift
+
+
+def compute_semantic_novelty(matrix: np.ndarray, k: int = 10) -> np.ndarray:
+    """Compute a semantic novelty score for each vector in `matrix`.
+
+    Measures average distance to the k-nearest neighbors in normalized embedding space.
+    Points far from established clusters have higher scores (boundary-spanning/interdisciplinary).
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    n_samples = len(matrix)
+    if n_samples <= 1:
+        return np.zeros(n_samples, dtype="float32")
+    normed = matrix / np.clip(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-12, None)
+    n_neighbors = min(k + 1, n_samples)
+    nn = NearestNeighbors(n_neighbors=n_neighbors, metric="cosine").fit(normed)
+    distances, _ = nn.kneighbors(normed)
+    if distances.shape[1] > 1:
+        return np.mean(distances[:, 1:], axis=1).astype("float32")
+    return np.zeros(n_samples, dtype="float32")
+
+
 def near_duplicate_pairs(
     matrix: np.ndarray, dois: list[str], threshold: float = DUPLICATE_THRESHOLD
 ) -> list[tuple[str, str, float]]:
@@ -273,6 +376,8 @@ def build_semantics(
     gold_session: Session,
     anchor_text: str = ANCHOR_TEXT,
     off_anchor_text: str = OFF_ANCHOR_TEXT,
+    *,
+    anchor_vectors: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict:
     """Rebuild `lit_semantics` and `lit_duplicate_pairs` from the abstract chunks.
 
@@ -281,9 +386,9 @@ def build_semantics(
     for the minority of articles that have a PDF.
     """
     rows = gold_session.execute(
-        select(Chunk.doi, Chunk.embedding, Chunk.text)
+        select(Chunk.doi, Chunk.embedding, Chunk.embedding_bin, Chunk.text)
         .where(Chunk.chunk_type == "abstract")
-        .where(Chunk.embedding.is_not(None))
+        .where((Chunk.embedding.is_not(None)) | (Chunk.embedding_bin.is_not(None)))
         .order_by(Chunk.doi)
     ).all()
 
@@ -318,10 +423,21 @@ def build_semantics(
         )
 
     dois = [r[0] for r in rows]
-    matrix = np.array([r[1] for r in rows], dtype="float32")
-    texts = [r[2] or "" for r in rows]
+    matrix = np.array(
+        [
+            np.frombuffer(r[2], dtype=np.float32)
+            if r[2] is not None
+            else np.array(r[1], dtype=np.float32)
+            for r in rows
+        ],
+        dtype="float32",
+    )
+    texts = [r[3] or "" for r in rows]
 
-    anchors = _embed_anchors([anchor_text, off_anchor_text])
+    if anchor_vectors is not None:
+        anchors = np.array(anchor_vectors, dtype="float32")
+    else:
+        anchors = _embed_anchors([anchor_text, off_anchor_text])
     scores = relevance_scores(matrix, anchors[0])
     offtopic = relevance_scores(matrix, anchors[1])
 

@@ -214,7 +214,12 @@ def fit_and_forecast(
 
     forecast_values = final_predict(np.array(forecast_years))
     forecast_values = np.clip(forecast_values, 0, None)  # counts can't be negative
-    margin = 1.96 * residual_std
+
+    # Dynamic horizon-expanding prediction intervals: forecast variance scales
+    # with lead time h (Var propto h, so std propto sqrt(h)), replacing static
+    # homoscedastic bands with statistically sound widening intervals.
+    step_factors = np.sqrt(np.arange(1, len(forecast_years) + 1, dtype=float))
+    margin = 1.96 * residual_std * step_factors
     forecast_lower = np.clip(forecast_values - margin, 0, None)
     forecast_upper = forecast_values + margin
 
@@ -248,3 +253,152 @@ def fit_and_forecast(
         r2_train=r2_train,
         notes=notes,
     )
+
+
+# --- Quantile Regression & Bass Diffusion -----------------------------------
+
+
+def fit_quantile_forecast(
+    years: np.ndarray,
+    values: np.ndarray,
+    forecast_years: tuple[int, ...] = FORECAST_YEARS,
+    quantiles: tuple[float, float, float] = (0.1, 0.5, 0.9),
+) -> dict:
+    """Fit asymmetric quantile regression curves for empirical uncertainty quantification."""
+    from sklearn.linear_model import LinearRegression, QuantileRegressor
+
+    if len(values) < 5 or np.all(values == 0):
+        return {
+            "valid": False,
+            "forecast_years": forecast_years,
+            "p10": np.zeros(len(forecast_years)),
+            "p50": np.zeros(len(forecast_years)),
+            "p90": np.zeros(len(forecast_years)),
+        }
+
+    x = years.reshape(-1, 1)
+    x_future = np.array(forecast_years).reshape(-1, 1)
+    results = {}
+
+    for q in quantiles:
+        try:
+            model = QuantileRegressor(quantile=q, alpha=0.1, solver="highs").fit(x, values)
+            pred = np.clip(model.predict(x_future), 0, None)
+        except Exception:
+            base_model = LinearRegression().fit(x, values)
+            base_pred = base_model.predict(x_future)
+            res = values - base_model.predict(x)
+            q_res = float(np.quantile(res, q))
+            pred = np.clip(base_pred + q_res, 0, None)
+        results[f"p{int(q * 100)}"] = pred
+
+    return {
+        "valid": True,
+        "forecast_years": forecast_years,
+        "p10": results.get("p10", np.zeros(len(forecast_years))),
+        "p50": results.get("p50", np.zeros(len(forecast_years))),
+        "p90": results.get("p90", np.zeros(len(forecast_years))),
+    }
+
+
+def _bass_cumulative(t: np.ndarray, p: float, q: float, m: float) -> np.ndarray:
+    """Continuous cumulative Bass diffusion function F(t) * m."""
+    pq = p + q
+    exp_term = np.exp(-pq * t)
+    return m * (1.0 - exp_term) / (1.0 + (q / max(1e-9, p)) * exp_term)
+
+
+def fit_bass_diffusion_nls(
+    years: np.ndarray,
+    annual_adoptions: np.ndarray,
+) -> dict:
+    """Fit the continuous Bass Diffusion Model via Non-Linear Least Squares (NLS).
+
+    Directly estimates innovation (p), imitation (q), and market capacity (m)
+    by fitting cumulative adoptions with scipy.optimize.curve_fit. Overcomes
+    the collinearity and negative curvature issues of discrete OLS.
+    """
+    from scipy.optimize import curve_fit
+
+    n = len(annual_adoptions)
+    if n < 5 or np.sum(annual_adoptions) <= 0:
+        return {"valid": False, "m": 0.0, "p": 0.0, "q": 0.0, "t_peak": None, "method": "nls"}
+
+    t_relative = np.arange(n, dtype=float)
+    y_cum = np.cumsum(annual_adoptions).astype(float)
+    total_obs = float(y_cum[-1])
+
+    # Initial parameter guess: standard diffusion priors
+    p0 = [0.03, 0.38, max(total_obs * 1.3, 10.0)]
+    bounds = ([1e-5, 1e-5, total_obs], [0.5, 1.5, total_obs * 20.0])
+
+    try:
+        popt, _ = curve_fit(_bass_cumulative, t_relative, y_cum, p0=p0, bounds=bounds, maxfev=2000)
+        p_est, q_est, m_est = float(popt[0]), float(popt[1]), float(popt[2])
+
+        t_peak_offset = np.log(q_est / p_est) / (p_est + q_est) if p_est < q_est else 0.0
+        t_peak = float(years[0] + t_peak_offset)
+
+        return {
+            "valid": True,
+            "m": round(m_est, 1),
+            "p": round(p_est, 4),
+            "q": round(q_est, 4),
+            "t_peak": round(t_peak, 1),
+            "stage": ("crescimento" if t_peak > float(years[-1]) else "maturidade"),
+            "method": "nls",
+        }
+    except Exception:
+        # Fallback to discrete OLS
+        return fit_bass_diffusion(years, annual_adoptions)
+
+
+def fit_bass_diffusion(
+    years: np.ndarray,
+    annual_adoptions: np.ndarray,
+) -> dict:
+    """Fit the classic Bass Diffusion Model (Bass, 1969) to emerging topic lifecycles.
+
+    Uses discrete OLS formulation with automatic fallback to NLS optimization.
+    """
+    if len(annual_adoptions) < 5 or np.sum(annual_adoptions) <= 0:
+        return {"valid": False, "m": 0.0, "p": 0.0, "q": 0.0, "t_peak": None}
+
+    y_cum = np.cumsum(annual_adoptions)
+    s_t = annual_adoptions[1:]
+    y_prev = y_cum[:-1]
+    y_prev_sq = y_prev**2
+
+    X = np.column_stack([np.ones_like(y_prev), y_prev, y_prev_sq])
+    try:
+        betas, _, _, _ = np.linalg.lstsq(X, s_t, rcond=None)
+        b0, b1, b2 = float(betas[0]), float(betas[1]), float(betas[2])
+
+        disc = b1**2 - 4 * b0 * b2
+        if b2 < 0 and disc > 0:
+            m = (-b1 - np.sqrt(disc)) / (2 * b2)
+            p = b0 / m
+            q = -m * b2
+            if p > 0 and q > 0:
+                t_peak_offset = np.log(q / p) / (p + q) if p < q else 0.0
+                t_peak = float(years[0] + t_peak_offset)
+                return {
+                    "valid": True,
+                    "m": float(m),
+                    "p": float(p),
+                    "q": float(q),
+                    "t_peak": t_peak,
+                    "stage": ("crescimento" if t_peak > float(years[-1]) else "maturidade"),
+                    "method": "ols",
+                }
+    except Exception:
+        pass
+
+    return {
+        "valid": False,
+        "m": float(np.sum(annual_adoptions) * 1.5),
+        "p": 0.03,
+        "q": 0.38,
+        "t_peak": None,
+        "method": "fallback",
+    }

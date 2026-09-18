@@ -19,6 +19,7 @@ import streamlit as st
 from lake_literature.dashboard.components import render_sidebar
 from lake_literature.dashboard.pages import (
     forecasting,
+    frontiers,
     highlights,
     overview,
     pipeline_layers,
@@ -27,6 +28,8 @@ from lake_literature.dashboard.pages import (
     researchers,
     search_config,
     semantics,
+    strategic,
+    synthesis,
     topics,
 )
 from lake_literature.dashboard.theme import apply_dashboard_theme, render_theme_toggle
@@ -38,6 +41,9 @@ PAGES = [
     (highlights.render, "Destaques e Impacto", "🏆", "highlights"),
     (researchers.render, "Pesquisadores", "👥", "researchers"),
     (semantics.render, "Semântica & Relevância", "🧭", "semantics"),
+    (strategic.render, "Cienciometria Estratégica", "🌐", "strategic"),
+    (synthesis.render, "Evidências Metodológicas", "🔬", "synthesis"),
+    (frontiers.render, "Frentes Tecnológicas & Disrupção", "🚀", "frontiers"),
     (forecasting.render, "Tendências & Previsão", "🔮", "forecast"),
     (pipeline_layers.render, "Camadas & Pipeline", "🏗️", "pipeline-layers"),
     (quality.render, "Qualidade e RAG", "🧩", "quality"),

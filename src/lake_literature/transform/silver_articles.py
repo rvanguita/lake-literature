@@ -12,6 +12,7 @@ forward as a distinct row.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from collections import defaultdict
 
@@ -22,8 +23,20 @@ from sqlalchemy.orm import Session
 from lake_literature.db.bronze_models import Article as BronzeArticle
 from lake_literature.db.raw_models import PdfFile
 from lake_literature.db.silver_models import Article as SilverArticle
+from lake_literature.db.silver_models import RejectedArticle
 
 PDF_MATCH_THRESHOLD = 85.0
+
+_NON_ARTICLE_TYPES = {"incollection", "book", "inbook"}
+_SHORT_ABSTRACT_THRESHOLD = 50  # characters
+
+
+def _is_non_article(record_type: str | None, abstract: str | None) -> bool:
+    """Flag records that are book front matter rather than research articles."""
+    if record_type and record_type.lower() in _NON_ARTICLE_TYPES:
+        if not abstract or len(abstract.strip()) < _SHORT_ABSTRACT_THRESHOLD:
+            return True
+    return False
 
 
 def normalize_title(title: str | None) -> str:
@@ -103,22 +116,37 @@ def build_silver_articles(
     bronze_articles = bronze_session.scalars(select(BronzeArticle)).all()
 
     by_doi: dict[str, list[BronzeArticle]] = defaultdict(list)
-    skipped_no_doi = 0
+    rejected_rows: list[RejectedArticle] = []
+    now = dt.datetime.now(dt.UTC)
     for article in bronze_articles:
         if not article.doi:
-            skipped_no_doi += 1
+            rejected_rows.append(
+                RejectedArticle(
+                    bronze_id=article.id,
+                    source=article.source,
+                    source_id=article.source_id,
+                    title=article.title,
+                    reason="no_doi",
+                    rejected_at=now,
+                )
+            )
             continue
         by_doi[article.doi].append(article)
 
     # Clear and rebuild -- silver is fully derived from bronze each run.
     silver_session.query(SilverArticle).delete()
+    silver_session.query(RejectedArticle).delete()
 
     silver_rows: list[SilverArticle] = []
     for doi, group in by_doi.items():
         merged = _merge_group(doi, group)
+        merged["is_non_article"] = _is_non_article(
+            merged.get("record_type"), merged.get("abstract")
+        )
         row = SilverArticle(**merged)
         silver_session.add(row)
         silver_rows.append(row)
+    silver_session.add_all(rejected_rows)
     silver_session.flush()  # assign ids for PDF linking
 
     pdf_files = raw_session.scalars(select(PdfFile)).all()
@@ -128,6 +156,8 @@ def build_silver_articles(
 
     return {
         "written": len(silver_rows),
-        "skipped_no_doi": skipped_no_doi,
+        "skipped_no_doi": len(rejected_rows),
+        "rejected_persisted": len(rejected_rows),
+        "non_articles": sum(1 for r in silver_rows if r.is_non_article),
         "has_pdf": sum(1 for r in silver_rows if r.has_pdf),
     }

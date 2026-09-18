@@ -13,7 +13,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+from datetime import UTC, datetime
 
 from lake_literature.db.bootstrap import bootstrap
 from lake_literature.db.engines import get_session
@@ -29,8 +31,36 @@ from lake_literature.transform.silver_articles import build_silver_articles
 
 STAGES = ("raw", "bronze", "silver", "gold", "embed", "semantic", "all")
 
+logger = logging.getLogger(__name__)
+
+
+def _record_run(stage: str, started: datetime, stats: dict | None, error: str | None) -> None:
+    """Persist a pipeline run record to `gold.lit_pipeline_runs`."""
+    try:
+        from lake_literature.db.gold_models import PipelineRun
+
+        finished = datetime.now(UTC)
+        run = PipelineRun(
+            stage=stage,
+            started_at=started,
+            finished_at=finished,
+            duration_seconds=(finished - started).total_seconds(),
+            stats=stats,
+            status="error" if error else "success",
+            error_message=error,
+        )
+        session = get_session("gold")
+        try:
+            session.add(run)
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        logger.debug("_record_run: could not persist run record", exc_info=True)
+
 
 def run_raw() -> dict:
+    started = datetime.now(UTC)
     session = get_session("raw")
     try:
         n_config = load_configs(session)
@@ -44,32 +74,46 @@ def run_raw() -> dict:
             "pdf_files": n_pdf,
         }
         print(f"[raw] {stats}")
+        _record_run("raw", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("raw", started, None, str(exc))
+        raise
     finally:
         session.close()
 
 
 def run_bronze() -> dict:
+    started = datetime.now(UTC)
     raw_session = get_session("raw")
     bronze_session = get_session("bronze")
     try:
         stats = build_bronze_articles(raw_session, bronze_session)
         stats = {"articles": stats["written"], "enriched": stats["enriched"]}
         print(f"[bronze] {stats}")
+        _record_run("bronze", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("bronze", started, None, str(exc))
+        raise
     finally:
         raw_session.close()
         bronze_session.close()
 
 
 def run_silver() -> dict:
+    started = datetime.now(UTC)
     bronze_session = get_session("bronze")
     silver_session = get_session("silver")
     raw_session = get_session("raw")
     try:
         stats = build_silver_articles(bronze_session, silver_session, raw_session)
         print(f"[silver] {stats}")
+        _record_run("silver", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("silver", started, None, str(exc))
+        raise
     finally:
         bronze_session.close()
         silver_session.close()
@@ -77,33 +121,48 @@ def run_silver() -> dict:
 
 
 def run_gold() -> dict:
+    started = datetime.now(UTC)
     silver_session = get_session("silver")
     gold_session = get_session("gold")
     try:
         stats = build_gold_articles(silver_session, gold_session)
         print(f"[gold] {stats}")
+        _record_run("gold", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("gold", started, None, str(exc))
+        raise
     finally:
         silver_session.close()
         gold_session.close()
 
 
 def run_embed() -> dict:
+    started = datetime.now(UTC)
     gold_session = get_session("gold")
     try:
         stats = build_embeddings(gold_session)
         print(f"[embed] {stats}")
+        _record_run("embed", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("embed", started, None, str(exc))
+        raise
     finally:
         gold_session.close()
 
 
 def run_semantic() -> dict:
+    started = datetime.now(UTC)
     gold_session = get_session("gold")
     try:
         stats = build_semantics(gold_session)
         print(f"[semantic] {stats}")
+        _record_run("semantic", started, stats, None)
         return stats
+    except Exception as exc:
+        _record_run("semantic", started, None, str(exc))
+        raise
     finally:
         gold_session.close()
 

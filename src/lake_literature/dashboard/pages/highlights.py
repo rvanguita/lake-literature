@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -21,7 +22,7 @@ from lake_literature.dashboard.components import (
     render_chart,
     require_columns,
 )
-from lake_literature.dashboard.theme import SOURCE_COLORS
+from lake_literature.dashboard.theme import CATEGORICAL_PALETTE, SOURCE_COLORS
 
 MIN_CITED_ARTICLES = 3
 
@@ -30,56 +31,66 @@ def render() -> None:
     page_header(
         "🏆",
         "Destaques e Impacto",
-        "Análise bibliométrica: contagem de referências por artigo, citações, colaboração e periódicos mais influentes.",
+        "Análise bibliométrica: embasamento em referências, dinâmica de citações, distribuições de cauda pesada e determinantes GLM.",
     )
 
     articles_df = loaders.require_articles()
 
-    tab_refs, tab_citations, tab_collab, tab_rankings = st.tabs(
-        ["📚 Referências", "⭐ Citações", "👥 Colaboração", "🏅 Rankings"]
+    tab_refs, tab_citations = st.tabs(
+        ["📚 Fundamentação Teórica (Referências)", "⭐ Dinâmica de Citações & Econometria"]
     )
 
     with tab_refs:
         ref_df = _reference_distribution_intro(articles_df)
-        sub_hist, sub_ecdf, sub_box, sub_vs_cit, sub_top = st.tabs(
+        sub_dist, sub_vs_cit, sub_top = st.tabs(
             [
-                "📊 Histograma",
-                "📈 ECDF",
-                "📦 Box Plot",
+                "📊 Distribuição de Referências",
                 "🔗 Refs vs. Citações",
                 "📖 Mais Referenciados",
             ]
         )
-        with sub_hist:
+        with sub_dist:
             if ref_df is not None:
-                _reference_histogram(ref_df)
-        with sub_ecdf:
-            if ref_df is not None:
-                _reference_ecdf(ref_df)
-        with sub_box:
-            if ref_df is not None:
-                _reference_box(ref_df)
+                view_mode = (
+                    st.segmented_control(
+                        "Formato de visualização da distribuição",
+                        options=["Histograma", "Curva Cumulativa (ECDF)", "Box Plot"],
+                        default="Histograma",
+                        key="ref_dist_mode",
+                    )
+                    or "Histograma"
+                )
+                if view_mode == "Histograma":
+                    _reference_histogram(ref_df)
+                elif view_mode == "Curva Cumulativa (ECDF)":
+                    _reference_ecdf(ref_df)
+                else:
+                    _reference_box(ref_df)
         with sub_vs_cit:
             _references_vs_citations(articles_df)
         with sub_top:
             _top_referenced(articles_df)
 
     with tab_citations:
-        sub_cited, sub_by_year = st.tabs(["🏆 Mais Citados", "📅 Citados por Ano"])
+        sub_cited, sub_by_year, sub_heavytail, sub_agenorm, sub_glm = st.tabs(
+            [
+                "🏆 Mais Citados",
+                "📅 Citados por Ano",
+                "📐 Cauda Pesada (Power-Law)",
+                "⏳ Normalizado por Idade",
+                "🔬 Determinantes GLM",
+            ]
+        )
         with sub_cited:
             _top_cited(articles_df)
         with sub_by_year:
             _cited_by_year(articles_df)
-
-    with tab_collab:
-        _collaboration_team_size(articles_df)
-
-    with tab_rankings:
-        sub_authors, sub_impact = st.tabs(["✍️ Autores Mais Prolíficos", "📈 Impacto por Periódico"])
-        with sub_authors:
-            _top_authors(articles_df)
-        with sub_impact:
-            _venue_impact(articles_df)
+        with sub_heavytail:
+            _heavy_tail_analysis(articles_df)
+        with sub_agenorm:
+            _age_normalized_rankings(articles_df)
+        with sub_glm:
+            _citation_determinants_glm_view(articles_df)
 
 
 def _reference_distribution_intro(articles_df: pd.DataFrame) -> pd.DataFrame | None:
@@ -385,6 +396,156 @@ def _cited_by_year(articles_df: pd.DataFrame) -> None:
         fig,
         caption="Quantidade de artigos publicados em cada ano que acumularam ao menos uma citação na "
         "literatura, por base e no total.",
+    )
+
+
+def _heavy_tail_analysis(articles_df: pd.DataFrame) -> None:
+    st.subheader("📐 Modelagem de Cauda Pesada em Citações (Power-Law vs. Log-Normal)")
+    st.caption(
+        "Citações acadêmicas exibem assimetria extrema. Este painel ajusta distribuições de cauda pesada "
+        "por Máxima Verossimilhança (MLE) e avalia a aderência pelo teste de Kolmogorov-Smirnov (KS)."
+    )
+    if "citation_count" not in articles_df.columns:
+        st.info("Contagem de citações não disponível.")
+        return
+
+    from lake_literature.dashboard.analytics import fit_heavy_tail_distributions
+
+    cites = articles_df["citation_count"].dropna().to_numpy()
+    fit_res = fit_heavy_tail_distributions(cites)
+    if not fit_res.get("valid"):
+        st.info("Dados insuficientes para ajuste estatístico de cauda pesada.")
+        return
+
+    models = fit_res["models"]
+    best = fit_res["best_fit"]
+    best_name = {
+        "power_law": "Lei de Potência (Pareto)",
+        "log_normal": "Log-Normal",
+        "exponential": "Exponencial",
+    }.get(best, best)
+
+    metric_row(
+        [
+            ("🏆 Melhor Ajuste (KS)", best_name, f"Distância KS: {models[best]['ks_stat']:.4f}"),
+            (
+                "⚡ Expoente Power-Law (α)",
+                f"{models['power_law']['alpha']:.2f}",
+                f"x_min = {models['power_law']['x_min']:.0f}",
+            ),
+            (
+                "📊 Média Log-Normal (μ)",
+                f"{models['log_normal']['mu']:.2f}",
+                f"σ = {models['log_normal']['sigma']:.2f}",
+            ),
+            (
+                "📉 P-valor KS (Melhor)",
+                f"{models[best]['p_value']:.4f}",
+                "H0: aderência aos dados",
+            ),
+        ]
+    )
+
+    arr = cites[cites > 0]
+    sorted_c = np.sort(arr)
+    ccdf = 1.0 - np.arange(len(sorted_c)) / len(sorted_c)
+    ccdf_df = pd.DataFrame({"citation_count": sorted_c, "ccdf": ccdf})
+
+    fig = px.line(
+        ccdf_df,
+        x="citation_count",
+        y="ccdf",
+        log_x=True,
+        log_y=True,
+        title="Distribuição Acumulada Complementar Empírica (CCDF Log-Log)",
+        labels={
+            "citation_count": "Citações (escala log)",
+            "ccdf": "P(Citações ≥ x) (escala log)",
+        },
+        color_discrete_sequence=[CATEGORICAL_PALETTE[0]],
+    )
+    render_chart(
+        fig,
+        caption="Em escala log-log, uma Lei de Potência pura (Pareto) forma uma linha reta decrescente. "
+        "A curvatura suave nos valores intermediários confirma que a distribuição Log-Normal "
+        "frequentemente modela a literatura com maior fidelidade antes do regime assintótico.",
+    )
+
+
+def _age_normalized_rankings(articles_df: pd.DataFrame) -> None:
+    st.subheader("⏳ Impacto Normalizado pela Idade do Artigo")
+    st.caption(
+        "Artigos antigos acumulam mais citações brutas por mera exposição temporal. "
+        "A taxa anualizada de citações e o z-score por coorte anual de publicação revelam trabalhos "
+        "recentes que estão alcançando velocidade de impacto excepcional."
+    )
+    from lake_literature.dashboard.analytics import age_normalized_citations
+
+    norm_df = age_normalized_citations(articles_df)
+    if "citation_rate_annual" not in norm_df.columns:
+        st.info("Dados insuficientes para normalização por idade.")
+        return
+
+    top_rate = norm_df.nlargest(20, "citation_rate_annual").copy()
+    for col in (
+        "citation_rate_annual",
+        "cohort_citation_zscore",
+        "cohort_citation_percentile",
+    ):
+        if col in top_rate.columns:
+            top_rate[col] = top_rate[col].round(2)
+
+    article_table(
+        top_rate,
+        [
+            "title",
+            "year",
+            "venue",
+            "source",
+            "citation_count",
+            "citation_rate_annual",
+            "cohort_citation_percentile",
+            "doi",
+        ],
+        download_key="impacto_normalizado_idade",
+    )
+
+
+def _citation_determinants_glm_view(articles_df: pd.DataFrame) -> None:
+    st.subheader("🔬 Determinantes Estatísticos do Impacto (GLM Poisson)")
+    st.caption(
+        "Regressão de contagem de Poisson modelando quais características do artigo aumentam "
+        "sua taxa esperada de citações. O IRR (Incidence Rate Ratio) indica o fator multiplicativo "
+        "no número de citações para cada unidade adicional da variável explicativa."
+    )
+    from lake_literature.dashboard.analytics import citation_determinants_glm
+
+    glm_res = citation_determinants_glm(articles_df)
+    if not glm_res.get("valid"):
+        st.info("Amostra insuficiente de artigos com citações para regressão econométrica.")
+        return
+
+    features = glm_res["features"]
+    coefs = glm_res["coefficients"]
+    irrs = glm_res["irr"]
+
+    feat_labels = {
+        "ano_publicacao": "Ano de Publicação (efeito do tempo)",
+        "qtd_referencias": "Quantidade de Referências (embasamento)",
+        "tamanho_equipe": "Tamanho da Equipe (autores)",
+        "origem_ieee": "Publicado na IEEE (vs. Elsevier)",
+    }
+
+    glm_df = pd.DataFrame(
+        {
+            "Variável Explicativa": [feat_labels.get(f, f) for f in features],
+            "Coeficiente (β)": [round(c, 4) for c in coefs],
+            "IRR (Multiplicador de Citações)": [round(i, 4) for i in irrs],
+        }
+    )
+    st.dataframe(glm_df, hide_index=True, width="stretch")
+    st.caption(
+        f"Pseudo R² do modelo: {glm_res.get('score', 0):.3f}. Um IRR > 1,0 indica efeito positivo na atração de citações."
     )
 
 

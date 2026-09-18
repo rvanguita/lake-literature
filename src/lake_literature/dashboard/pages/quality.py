@@ -12,13 +12,14 @@ import streamlit as st
 from lake_literature.dashboard import actions, loaders
 from lake_literature.dashboard.charts import topn_hbar
 from lake_literature.dashboard.components import (
+    article_table,
     hero_banner,
     metric_row,
     page_header,
     render_chart,
     require_columns,
 )
-from lake_literature.dashboard.search import semantic_search
+from lake_literature.dashboard.search import hybrid_search_rrf, semantic_search
 from lake_literature.dashboard.theme import (
     CATEGORICAL_PALETTE,
     CHART_HEIGHT,
@@ -51,8 +52,15 @@ def render() -> None:
         f"<b>{len(chunks_df):,}</b> chunks prontos para recuperação.",
     )
 
-    tab_metadata, tab_fulltext, tab_chunks, tab_ieee, tab_search = st.tabs(
-        ["🗂️ Metadados", "📄 Texto completo", "🧩 Chunks & Embeddings", "🔷 Extras IEEE", "🔍 Busca"]
+    tab_metadata, tab_fulltext, tab_chunks, tab_ieee, tab_anomalies, tab_search = st.tabs(
+        [
+            "🗂️ Metadados",
+            "📄 Texto completo",
+            "🧩 Chunks & Embeddings",
+            "🔷 Extras IEEE",
+            "🕵️ Auditoria & Anomalias",
+            "🔍 Busca",
+        ]
     )
 
     with tab_metadata:
@@ -83,6 +91,9 @@ def render() -> None:
                 _chunks_per_article(chunks_df)
         with sub_embed:
             _embedding_readiness(chunks_df)
+
+    with tab_anomalies:
+        _bibliometric_anomalies_audit(articles_df)
 
     with tab_search:
         _search_demo(chunks_df)
@@ -270,6 +281,23 @@ def _embedding_readiness(chunks_df: pd.DataFrame) -> None:
         caption=f"{with_embedding:,} de {total:,} chunks têm embedding. {model_caption}",
     )
 
+    # Per-chunk-type embedding breakdown
+    if "chunk_type" in chunks_df.columns:
+        by_type = (
+            chunks_df.groupby("chunk_type")
+            .agg(
+                total=("chunk_type", "size"),
+                embedded=("has_embedding", "sum")
+                if "has_embedding" in chunks_df.columns
+                else ("chunk_type", lambda x: 0),
+            )
+            .reset_index()
+        )
+        by_type["embedded"] = by_type["embedded"].astype(int)
+        by_type["pendente"] = by_type["total"] - by_type["embedded"]
+        by_type.columns = ["Tipo", "Total", "Com embedding", "Pendente"]
+        st.dataframe(by_type, hide_index=True, width="stretch")
+
     if pending > 0:
         if st.button(
             f"🚀 Gerar embeddings agora ({pending:,} chunks pendentes)", key="generate_embeddings"
@@ -439,16 +467,35 @@ def _chunks_intro(chunks_df: pd.DataFrame) -> bool:
     ):
         return False
 
+    n_abstract = int((chunks_df["chunk_type"] == "abstract").sum())
+    n_fulltext = int((chunks_df["chunk_type"] == "fulltext").sum())
+    n_dois = chunks_df["doi"].nunique() if "doi" in chunks_df else 0
+    n_ft_dois = (
+        chunks_df.loc[chunks_df["chunk_type"] == "fulltext", "doi"].nunique()
+        if "doi" in chunks_df.columns
+        else 0
+    )
+
     metric_row(
         [
             ("🧩 Total de fragmentos (chunks)", f"{len(chunks_df):,}", None),
+            ("📝 Chunks de resumo", f"{n_abstract:,}", None),
+            ("📄 Chunks de texto completo", f"{n_fulltext:,}", f"{n_ft_dois} artigos com PDF"),
             (
                 "📄 DOIs distintos com fragmentos",
-                f"{chunks_df['doi'].nunique():,}" if "doi" in chunks_df else "N/D",
+                f"{n_dois:,}",
                 None,
             ),
         ]
     )
+
+    if n_fulltext > 0 and n_dois > 0:
+        st.caption(
+            f"⚠️ **Viés de cobertura**: texto completo cobre {n_ft_dois} de {n_dois} artigos "
+            f"({100 * n_ft_dois / n_dois:.1f}%), mas gera {n_fulltext:,} de {len(chunks_df):,} "
+            f"chunks ({100 * n_fulltext / len(chunks_df):.1f}%). Estatísticas por chunk refletem "
+            f"desproporcionalmente esses {100 * n_ft_dois / n_dois:.1f}% do corpus."
+        )
     return True
 
 
@@ -588,10 +635,25 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
         st.info("Nenhum chunk disponível nesta camada/filtro.")
         return
 
-    query = st.text_input(
-        "Buscar (linguagem natural ou termo):" if has_embeddings else "Buscar termo nos chunks:",
-        placeholder="ex.: distribution network, hosting capacity, monte carlo...",
-    )
+    search_mode = "Híbrido (Vetorial + BM25 RRF)"
+    if has_embeddings:
+        col_q, col_m = st.columns([3, 2])
+        with col_q:
+            query = st.text_input(
+                "Buscar (linguagem natural ou termo):",
+                placeholder="ex.: distribution network, hosting capacity, IEEE 33-bus, SOCP...",
+            )
+        with col_m:
+            search_mode = st.radio(
+                "Algoritmo de Recuperação:",
+                options=["Híbrido (Vetorial + BM25 RRF)", "Vetorial Puro (BGE-Small)"],
+                horizontal=True,
+            )
+    else:
+        query = st.text_input(
+            "Buscar termo nos chunks:",
+            placeholder="ex.: distribution network, hosting capacity, monte carlo...",
+        )
     if not query:
         return
 
@@ -610,9 +672,14 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
         return
 
     if has_embeddings:
-        matches = semantic_search(query, scoped, top_k=SEARCH_DEMO_MAX_RESULTS)
+        if "Híbrido" in search_mode:
+            matches = hybrid_search_rrf(query, scoped, top_k=SEARCH_DEMO_MAX_RESULTS)
+            caption_mode = "Busca Híbrida RRF (Dense BGE-Small + BM25 Okapi)"
+        else:
+            matches = semantic_search(query, scoped, top_k=SEARCH_DEMO_MAX_RESULTS)
+            caption_mode = "Busca Vetorial Densa (BGE-Small)"
         st.caption(
-            f"Top {len(matches):,} chunks mais similares à consulta (de {len(scoped):,} disponíveis)."
+            f"{caption_mode} — Top {len(matches):,} chunks mais relevantes (de {len(scoped):,} disponíveis)."
         )
     else:
         mask = scoped["text"].str.contains(query, case=False, na=False, regex=False)
@@ -630,3 +697,75 @@ def _search_demo(chunks_df: pd.DataFrame) -> None:
 
     if not has_embeddings and n_total_matches > SEARCH_DEMO_MAX_RESULTS:
         st.caption(f"Mostrando {SEARCH_DEMO_MAX_RESULTS} de {n_total_matches:,} resultados.")
+
+
+def _bibliometric_anomalies_audit(articles_df: pd.DataFrame) -> None:
+    st.subheader("🕵️ Auditoria Não-Supervisionada de Anomalias (Isolation Forest)")
+    st.caption(
+        "O algoritmo Isolation Forest isola observações atípicas através de particionamento aleatório do espaço "
+        "multidimensional de atributos (ano de publicação, contagem de citações, referências, coautores e "
+        "relevância temática). Artigos anômalos requerem menos divisões para serem isolados, revelando "
+        "publicações hiper-citadas recentes, mega-equipes incomuns, desvios de metadados ou ruído de indexação."
+    )
+
+    signals = loaders.semantics()
+    joined = articles_df.copy()
+    if not signals.empty and "relevance_score" in signals.columns:
+        joined = pd.merge(joined, signals[["doi", "relevance_score"]], on="doi", how="left")
+
+    from lake_literature.dashboard.analytics import detect_bibliometric_anomalies
+
+    anomalies_df = detect_bibliometric_anomalies(joined, contamination=0.03)
+    n_anomalies = int(anomalies_df["is_anomaly"].sum())
+
+    metric_row(
+        [
+            ("📚 Total de Artigos Auditados", f"{len(anomalies_df):,}", None),
+            (
+                "🚩 Artigos Atípicos Detectados",
+                f"{n_anomalies}",
+                f"{n_anomalies / max(len(anomalies_df), 1):.1%} do acervo",
+            ),
+            ("🎯 Contaminação Assumida", "3.0%", "Limiar estatístico"),
+            ("🔍 Algoritmo", "Isolation Forest", "100 estimadores / árvores"),
+        ]
+    )
+
+    fig = px.scatter(
+        anomalies_df,
+        x="year",
+        y="citation_count",
+        color="is_anomaly",
+        color_discrete_map={True: "#e34948", False: "#2a78d6"},
+        hover_data=["title", "venue", "anomaly_reason", "anomaly_score"],
+        labels={
+            "year": "Ano de Publicação",
+            "citation_count": "Citações",
+            "is_anomaly": "Atípico?",
+        },
+        title="Dispersão Citações × Ano com Marcação de Anomalias Bibliométricas",
+    )
+    fig.update_layout(height=480)
+    render_chart(
+        fig,
+        caption="Pontos vermelhos indicam artigos cujos vetores de atributos se distanciam significativamente do padrão mediano do corpus.",
+    )
+
+    st.markdown("##### 📋 Artigos Auditados como Atípicos")
+    outliers = (
+        anomalies_df[anomalies_df["is_anomaly"]]
+        .sort_values("anomaly_score", ascending=False)
+        .copy()
+    )
+    cols = [
+        "title",
+        "year",
+        "venue",
+        "citation_count",
+        "source",
+        "anomaly_score",
+        "anomaly_reason",
+        "doi",
+    ]
+    display_cols = [c for c in cols if c in outliers.columns]
+    article_table(outliers, display_cols, download_key="artigos_anomalos_auditoria")

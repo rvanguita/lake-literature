@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -59,6 +60,7 @@ def build_embeddings(gold_session: Session, on_progress: ProgressCallback | None
         vectors = model.embed(texts)
         for chunk, vector in zip(ordered_chunks, vectors, strict=True):
             chunk.embedding = vector.tolist()
+            chunk.embedding_bin = np.array(vector, dtype=np.float32).tobytes()
             chunk.embed_model = EMBED_MODEL_NAME
         gold_session.commit()
 

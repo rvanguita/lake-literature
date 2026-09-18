@@ -17,7 +17,12 @@ from lake_literature.dashboard.analytics import (
 )
 from lake_literature.dashboard.charts import lorenz_chart
 from lake_literature.dashboard.components import hero_banner, metric_row, page_header, render_chart
-from lake_literature.dashboard.theme import SOURCE_COLORS, TREND_DOWN_COLOR, TREND_UP_COLOR
+from lake_literature.dashboard.theme import (
+    SOURCE_COLORS,
+    TREND_DOWN_COLOR,
+    TREND_UP_COLOR,
+    theme_tokens,
+)
 
 
 def render() -> None:
@@ -171,14 +176,16 @@ def _correlation_heatmap(articles_df: pd.DataFrame) -> None:
         return
 
     corr = numeric_df.corr(numeric_only=True)
+    t = theme_tokens()
+    mid_color = t.get("heatmap_mid", "#0b1725")
     fig = px.imshow(
         corr,
         zmin=-1,
         zmax=1,
-        color_continuous_scale=[[0, TREND_DOWN_COLOR], [0.5, "#0b1725"], [1, TREND_UP_COLOR]],
+        color_continuous_scale=[[0, TREND_DOWN_COLOR], [0.5, mid_color], [1, TREND_UP_COLOR]],
         text_auto=".2f",
         aspect="auto",
-        labels={"color": "Correlação (Pearson)"},
+        labels={"x": "Métrica", "y": "Métrica", "color": "Correlação (Pearson)"},
     )
     fig.update_layout(xaxis_title="Métrica", yaxis_title="Métrica")
     # Plotly auto-thins tick labels that would collide, which silently drops

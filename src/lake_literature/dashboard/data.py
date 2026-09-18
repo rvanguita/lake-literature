@@ -197,3 +197,26 @@ def bronze_doi_dropped_counts() -> dict[str, int]:
     except SQLAlchemyError as exc:
         logger.warning("bronze_doi_dropped_counts: database unreachable (%s)", exc)
     return result
+
+
+def load_abstract_embeddings_data() -> pd.DataFrame:
+    """Load only abstract chunk embeddings (doi, embedding_bin, embedding) for vector projections and novelty."""
+    if not table_exists("gold", "lit_chunks"):
+        return pd.DataFrame()
+    engine = get_engine("gold")
+    table = Table("lit_chunks", MetaData(), autoload_with=engine)
+    cols = [table.c.doi]
+    if "embedding_bin" in table.c:
+        cols.append(table.c.embedding_bin)
+    if "embedding" in table.c:
+        cols.append(table.c.embedding)
+
+    query = select(*cols).where(table.c.chunk_type == "abstract")
+    if "embedding_bin" in table.c and "embedding" in table.c:
+        query = query.where((table.c.embedding_bin.is_not(None)) | (table.c.embedding.is_not(None)))
+    elif "embedding_bin" in table.c:
+        query = query.where(table.c.embedding_bin.is_not(None))
+    elif "embedding" in table.c:
+        query = query.where(table.c.embedding.is_not(None))
+
+    return pd.read_sql_query(query, engine)

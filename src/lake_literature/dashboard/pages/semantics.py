@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -33,7 +34,7 @@ MAP_COLOR_OPTIONS = {
     "Tema": "theme_label",
     "Relevância": "relevance_margin",
     "Ano": "year",
-    "Fonte": "source",
+    "Fonte": "source_display",
 }
 
 
@@ -68,11 +69,12 @@ def render() -> None:
         "sistemática, não um detalhe de implementação.",
     )
 
-    tab_triagem, tab_mapa, tab_temas, tab_dupes = st.tabs(
+    tab_triagem, tab_mapa, tab_temas, tab_novidade, tab_dupes = st.tabs(
         [
             "🎯 Triagem de Relevância",
             "🗺️ Mapa Semântico",
             "🧵 Temas Descobertos",
+            "💡 Novidade Semântica",
             "👯 Quase-Duplicatas",
         ]
     )
@@ -83,6 +85,8 @@ def render() -> None:
         _semantic_map(scored)
     with tab_temas:
         _themes(scored)
+    with tab_novidade:
+        _semantic_novelty_panel(scored)
     with tab_dupes:
         _duplicates()
 
@@ -99,17 +103,33 @@ def _relevance_screening(scored: pd.DataFrame) -> None:
     margin = scored["relevance_margin"]
     low = scored[margin < 0]
 
-    metric_row(
-        [
-            ("📄 Artigos com score", f"{len(scored):,}", None),
-            ("📊 Margem mediana", f"{margin.median():+.3f}", None),
-            (
-                "🚩 Fora do escopo (margem < 0)",
-                f"{len(low):,}",
-                f"{100 * len(low) / len(scored):.1f}% do corpus",
-            ),
-        ]
+    # Articles without an abstract have a title-only vector -- their score
+    # comes from much weaker signal and should not influence percentile stats.
+    has_abstract_col = "has_abstract" in scored.columns
+    title_only = (
+        scored[~scored["has_abstract"].astype(bool)] if has_abstract_col else scored.iloc[0:0]
     )
+    stats_base = scored[scored["has_abstract"].astype(bool)] if has_abstract_col else scored
+    stats_margin = stats_base["relevance_margin"] if not stats_base.empty else margin
+
+    metrics = [
+        ("📄 Artigos com score", f"{len(scored):,}", None),
+        ("📊 Margem mediana", f"{stats_margin.median():+.3f}", None),
+        (
+            "🚩 Fora do escopo (margem < 0)",
+            f"{len(low):,}",
+            f"{100 * len(low) / len(scored):.1f}% do corpus",
+        ),
+    ]
+    if len(title_only) > 0:
+        metrics.append(
+            (
+                "⚠️ Sem resumo (título-only)",
+                f"{len(title_only):,}",
+                "excluídos das estatísticas de margem",
+            )
+        )
+    metric_row(metrics)
 
     fig = px.histogram(
         scored,
@@ -142,8 +162,40 @@ def _relevance_screening(scored: pd.DataFrame) -> None:
     review = low.sort_values("relevance_margin").head(TOP_REVIEW_ROWS).copy()
     for column in ("relevance_margin", "relevance_score"):
         review[column] = review[column].round(3)
+    if "has_abstract" in review.columns:
+        review["nota"] = review["has_abstract"].apply(lambda x: "" if x else "⚠️ título-only")
+    display_cols = [
+        "relevance_margin",
+        "relevance_score",
+        "theme_label",
+        "title",
+        "year",
+        "venue",
+        "source",
+        "doi",
+    ]
+    if "nota" in review.columns:
+        display_cols.insert(0, "nota")
     article_table(
         review,
+        display_cols,
+        download_key="fora_do_escopo",
+    )
+
+    st.divider()
+    st.subheader("🤖 Triagem Assistida por Active Learning (Amostragem por Incerteza)")
+    st.caption(
+        "Artigos onde a margem contrastante está mais próxima de zero (|Δ| ≈ 0) representam a "
+        "fronteira de decisão de máxima ambiguidade. Priorizar a inspeção manual destes casos acelera o "
+        "refinamento da triagem sistemática (SLR) com o menor esforço de leitura humana."
+    )
+    uncertain = scored[scored["relevance_margin"].notna()].copy()
+    uncertain["abs_margin"] = uncertain["relevance_margin"].abs()
+    uncertain = uncertain.sort_values("abs_margin").head(25)
+    for col in ("relevance_margin", "relevance_score"):
+        uncertain[col] = uncertain[col].round(3)
+    article_table(
+        uncertain,
         [
             "relevance_margin",
             "relevance_score",
@@ -154,7 +206,7 @@ def _relevance_screening(scored: pd.DataFrame) -> None:
             "source",
             "doi",
         ],
-        download_key="fora_do_escopo",
+        download_key="active_learning_incerteza",
     )
 
 
@@ -226,93 +278,328 @@ def _semantic_map(scored: pd.DataFrame) -> None:
         return
 
     plot_df = scored.dropna(subset=["map_x", "map_y"]).copy()
-    plot_df["Título"] = plot_df["title"].fillna("—").str.slice(0, 90)
+
+    # Prepara atributos descritivos e amigáveis para tooltip e legendas
+    plot_df["title_display"] = plot_df["title"].fillna("Sem título")
+    plot_df["title_hover"] = plot_df["title_display"].apply(
+        lambda t: (
+            "<br>".join([t[i : i + 65] for i in range(0, min(len(t), 195), 65)])
+            + ("..." if len(t) > 195 else "")
+        )
+    )
+    plot_df["venue_display"] = plot_df["venue"].fillna("Periódico não informado")
+    plot_df["year_display"] = plot_df["year"].fillna("—").astype(str)
+    source_map = {"ieee": "IEEE Xplore", "elsevier": "ScienceDirect (Elsevier)"}
+    plot_df["source_display"] = plot_df["source"].map(source_map).fillna(plot_df["source"])
+    plot_df["theme_display"] = plot_df["theme_label"].fillna("Sem tema atribuído")
+
+    if "relevance_margin" in plot_df.columns:
+        plot_df["status_display"] = np.where(
+            plot_df["relevance_margin"] >= 0,
+            "🟢 In-Scope (Energia / Relevante)",
+            "🔴 Off-Topic (Logística / Geral)",
+        )
+    else:
+        plot_df["status_display"] = "—"
+
+    # Se relevance_margin não existir, faz fallback para relevance_score
+    available_map = dict(MAP_COLOR_OPTIONS)
+    if "relevance_margin" not in plot_df.columns and "relevance_score" in plot_df.columns:
+        available_map["Relevância"] = "relevance_score"
 
     available = {
         label: column
-        for label, column in MAP_COLOR_OPTIONS.items()
+        for label, column in available_map.items()
         if column in plot_df.columns and plot_df[column].notna().any()
     }
-    choice = st.radio(
-        "Colorir por",
-        options=list(available),
-        horizontal=True,
-        key="semantic_map_color",
-        help="A posição dos pontos não muda — só o que a cor está contando sobre eles.",
-    )
+
+    ctrl_col0, ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.3, 2.5, 2.5, 2.7])
+    with ctrl_col0:
+        proj_choice = (
+            st.segmented_control(
+                "Projeção",
+                options=["t-SNE", "PCA 2D", "UMAP"],
+                default="t-SNE",
+                key="sem_proj_choice",
+                help="Alterna a técnica de redução dimensional dos vetores 384D.",
+            )
+            or "t-SNE"
+        )
+    with ctrl_col1:
+        choice = (
+            st.segmented_control(
+                "Colorir por",
+                options=list(available),
+                default="Tema",
+                key="semantic_map_color",
+                help="Altera a dimensão cromática dos pontos no espaço vetorial.",
+            )
+            or "Tema"
+        )
+    with ctrl_col2:
+        legend_pos = (
+            st.segmented_control(
+                "Posição da legenda",
+                options=["Lateral direita", "Inferior", "Ocultar"],
+                default="Lateral direita",
+                key="sem_map_legend_pos",
+                help="Posicione a legenda para melhor legibilidade ou oculte para expandir o gráfico.",
+            )
+            or "Lateral direita"
+        )
+    with ctrl_col3:
+        sub_c1, sub_c2 = st.columns(2)
+        with sub_c1:
+            show_density = st.checkbox(
+                "🌊 Densidade (KDE)",
+                value=False,
+                key="sem_show_density",
+                help="Sobrepõe curvas de nível de densidade de probabilidade bidimensional.",
+            )
+        with sub_c2:
+            show_theme_labels = st.checkbox(
+                "🏷️ Rótulos no mapa",
+                value=True,
+                key="sem_show_theme_labels",
+                help="Exibe os nomes dos temas sobre os centróides medianos dos clusters em primeiro plano.",
+            )
+
+    if proj_choice in ("PCA 2D", "UMAP"):
+        alts = loaders.alternative_projections()
+        if proj_choice in alts and not alts[proj_choice].empty:
+            alt_df = alts[proj_choice]
+            plot_df = (
+                plot_df.drop(columns=["map_x", "map_y"], errors="ignore")
+                .merge(alt_df[["doi", "map_x", "map_y"]], on="doi", how="left")
+                .dropna(subset=["map_x", "map_y"])
+            )
+
     color_column = available[choice]
     continuous = choice in ("Relevância", "Ano")
 
-    hover_data = {"map_x": False, "map_y": False, "year": True, "relevance_score": ":.3f"}
-    if "relevance_margin" in plot_df.columns:
-        hover_data["relevance_margin"] = ":.3f"
     fig = px.scatter(
         plot_df,
         x="map_x",
         y="map_y",
         color=color_column,
-        hover_name="Título",
-        hover_data=hover_data,
-        title="Cada ponto é um artigo; a proximidade reflete similaridade de conteúdo",
-        labels={
-            "theme_label": "Tema",
-            "relevance_margin": "Margem",
-            "relevance_score": "Relevância",
-            "year": "Ano",
-            "source": "Base",
-        },
-        # A continuous dimension gets a scale, a categorical one the shared
-        # palette -- `color_discrete_sequence` is simply ignored by px on a
-        # numeric column, so passing both would silently do nothing.
+        custom_data=[
+            "title_hover",
+            "venue_display",
+            "year_display",
+            "source_display",
+            "theme_display",
+            "relevance_score",
+            "relevance_margin" if "relevance_margin" in plot_df.columns else "relevance_score",
+            "status_display",
+        ],
         color_continuous_scale=None if not continuous else ["#e34948", "#eda100", "#1baf7a"],
         color_discrete_sequence=CATEGORICAL_PALETTE,
         opacity=0.75,
     )
-    fig.update_traces(marker=dict(size=6))
-    _add_theme_labels(fig, plot_df)
-    # As coordenadas do t-SNE não têm unidade nem orientação interpretável --
-    # só a vizinhança entre pontos significa algo --, por isso os valores dos
-    # ticks ficam ocultos. Os eixos continuam nomeados: sem nome nenhum, o
-    # leitor não sabe sequer em que plano está olhando.
-    fig.update_layout(
-        xaxis=dict(title="Dimensão 1 (t-SNE)", showticklabels=False),
-        yaxis=dict(title="Dimensão 2 (t-SNE)", showticklabels=False),
-        legend_title_text="Tema",
+    fig.update_traces(
+        marker=dict(size=6),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br><br>"
+            "🏛️ <b>Veículo:</b> %{customdata[1]}<br>"
+            "📅 <b>Ano:</b> %{customdata[2]}  •  🏷️ <b>Base:</b> %{customdata[3]}<br>"
+            "🎯 <b>Tema:</b> %{customdata[4]}<br>"
+            "📊 <b>Relevância:</b> %{customdata[5]:.3f} (Margem Δ: %{customdata[6]:.3f})<br>"
+            "🚦 <b>Triagem:</b> %{customdata[7]}"
+            "<extra></extra>"
+        ),
     )
+
+    if show_density:
+        fig.add_trace(
+            go.Histogram2dContour(
+                x=plot_df["map_x"],
+                y=plot_df["map_y"],
+                colorscale="Blues",
+                reversescale=True,
+                showscale=False,
+                opacity=0.35,
+                contours=dict(coloring="fill", showlabels=False),
+                hoverinfo="skip",
+            )
+        )
+        fig.data = (fig.data[-1],) + fig.data[:-1]
+
+    if show_theme_labels:
+        _add_theme_labels(fig, plot_df)
+
+    # Título principal estruturado e eixos conceituais
+    fig.update_layout(
+        title=dict(
+            text="Mapa Semântico do Corpus",
+            subtitle=dict(
+                text="Projeção 2D dos resumos vetoriais (embeddings) — proximidade espacial indica convergência temático-conceitual"
+            ),
+        ),
+        xaxis=dict(title="Eixo Semântico 1 (Espaço Latente)", showticklabels=False),
+        yaxis=dict(title="Eixo Semântico 2 (Espaço Latente)", showticklabels=False),
+    )
+
+    # Título dinâmico da legenda categórica
+    if choice == "Tema":
+        legend_title_text = "<b>Tema Temático</b><br><span style='font-size:10px; color:#888;'>Agrupamento de tópicos</span>"
+    elif choice == "Fonte":
+        legend_title_text = "<b>Base Indexadora</b>"
+    else:
+        legend_title_text = ""
+
+    # Posicionamento da legenda ou barra de cores
+    if continuous:
+        if choice == "Relevância":
+            fig.update_layout(
+                coloraxis_colorbar=dict(
+                    title=dict(
+                        text="<b>Margem (Δ)</b><br><span style='font-size:10px;'>Off-topic < 0 < In-scope</span>",
+                        side="top",
+                    ),
+                    tickvals=[-0.2, -0.1, 0.0, 0.1, 0.2],
+                    ticktext=["-0.20", "-0.10", "0.00 Limiar", "+0.10", "+0.20"],
+                )
+            )
+        elif choice == "Ano":
+            fig.update_layout(
+                coloraxis_colorbar=dict(
+                    title=dict(text="<b>Ano de Publicação</b>", side="top"),
+                    dtick=2,
+                )
+            )
+        chart_margin = dict(l=40, r=120, t=95, b=40)
+    else:
+        if legend_pos == "Lateral direita":
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",
+                    y=1,
+                    xanchor="left",
+                    x=1.01,
+                    title=dict(text=legend_title_text),
+                    font=dict(size=11),
+                    itemsizing="constant",
+                    tracegroupgap=6,
+                ),
+            )
+            chart_margin = dict(l=40, r=300, t=95, b=40)
+        elif legend_pos == "Inferior":
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.16,
+                    xanchor="center",
+                    x=0.5,
+                    title=dict(text=legend_title_text),
+                    font=dict(size=11),
+                    itemsizing="constant",
+                ),
+            )
+            chart_margin = dict(l=40, r=40, t=95, b=120)
+        else:  # "Ocultar"
+            fig.update_layout(showlegend=False)
+            chart_margin = dict(l=40, r=40, t=95, b=40)
+
     render_chart(
         fig,
-        height=620,
+        height=650,
+        margin=chart_margin,
         caption="Projeção t-SNE dos embeddings dos resumos, calculada no **mesmo espaço** em que os "
         "temas são descobertos — é isso que faz a cor de um ponto concordar com onde ele caiu. "
-        "**Os eixos não têm significado**: só a proximidade entre pontos importa. Medido, o corpus é "
-        "um contínuo denso com **uma** ilha destacada (a de logística, a contaminação da busca ficando "
-        "visível); os temas são recortes desse contínuo, não grupos naturalmente separados.",
+        "**Os eixos não têm significado numérico absoluto**: apenas a distância relativa entre pontos importa. "
+        "O corpus forma um contínuo denso de planejamento de redes elétricas com **uma** ilha destacada "
+        "(a de logística/pesquisa operacional, contaminação da busca pela palavra *distribution*); "
+        "os temas são recortes desse contínuo revelados por agrupamento semântico denso.",
     )
 
 
 def _add_theme_labels(fig, plot_df: pd.DataFrame) -> None:
-    """Write each theme's name on the map, at the median of its points.
-
-    Median, not mean: one article dragged to the far side of the projection
-    would otherwise pull the label off its own cloud. This is a text *trace*
-    (data), not `add_annotation` -- the dashboard's chart contract keeps
-    annotations out of charts because they used to be guide lines covering the
-    data, which these labels aren't.
-    """
+    """Write each theme's name on the map as an annotation badge in front of points."""
     if "theme_label" not in plot_df.columns:
         return
     centroids = plot_df.groupby("theme_label")[["map_x", "map_y"]].median().reset_index()
-    fig.add_trace(
-        go.Scatter(
-            x=centroids["map_x"],
-            y=centroids["map_y"],
-            mode="text",
-            text=centroids["theme_label"],
-            textfont=dict(size=11, color=theme_tokens()["chart_annotation"]),
-            hoverinfo="skip",
-            showlegend=False,
-        )
+    t = theme_tokens()
+    labels = centroids["theme_label"].apply(
+        lambda s: "<br>".join(s.split(" · ")) if " · " in s else s
     )
+    for (_, row), label in zip(centroids.iterrows(), labels, strict=True):
+        fig.add_annotation(
+            x=row["map_x"],
+            y=row["map_y"],
+            text=f"<b>{label}</b>",
+            showarrow=False,
+            font=dict(size=10, color=t["chart_annotation"]),
+            bgcolor=t["legend_bg"],
+            bordercolor=t["legend_border"],
+            borderwidth=1,
+            borderpad=4,
+            opacity=0.92,
+        )
+
+
+def _semantic_novelty_panel(scored: pd.DataFrame) -> None:
+    st.subheader("💡 Novidade Semântica e Interdisciplinaridade (Cosine Outlier Factor)")
+    st.caption(
+        "Mede a distância média aos $k$-vizinhos mais próximos no espaço vetorial 384D. "
+        "Artigos com alto score de novidade situam-se em regiões de fronteira conceitual ou combinam tópicos "
+        "distintos (interdisciplinaridade), revelando publicações pioneiras ou atípicas no corpus."
+    )
+
+    nov_df = loaders.semantic_novelty_scores()
+    if nov_df.empty:
+        st.info("Matriz de embeddings não disponível para calcular novidade semântica.")
+        return
+
+    merged = pd.merge(scored, nov_df, on="doi", how="inner")
+    if merged.empty:
+        st.info("Nenhum artigo com score de novidade correspondente.")
+        return
+
+    nov = merged["novelty_score"]
+    p90 = float(nov.quantile(0.90))
+
+    metric_row(
+        [
+            ("💡 Novidade Mediana", f"{nov.median():.3f}", None),
+            ("🌟 Limiar Top 10% (P90)", f"{p90:.3f}", "Artigos mais singulares"),
+            ("🚀 Artigo Mais Inovador", f"{nov.max():.3f}", None),
+            ("📚 Total Avaliado", f"{len(merged):,}", "Embeddings 384D"),
+        ]
+    )
+
+    fig = px.scatter(
+        merged,
+        x="novelty_score",
+        y="relevance_score" if "relevance_score" in merged.columns else "novelty_score",
+        color="theme_label" if "theme_label" in merged.columns else None,
+        hover_data=["title", "year", "venue"],
+        labels={
+            "novelty_score": "Score de Novidade Semântica (Distância k-NN)",
+            "relevance_score": "Relevância Temática",
+            "theme_label": "Tema",
+        },
+        color_discrete_sequence=CATEGORICAL_PALETTE,
+        title="Dispersão: Novidade Semântica vs. Relevância no Corpus",
+    )
+    fig.add_vline(x=p90, line_dash="dash", line_color="#eb6834", annotation_text="P90 Novidade")
+    fig.update_layout(height=480)
+    render_chart(
+        fig,
+        caption="O quadrante superior direito reúne artigos de alta relevância com formulações conceituais singulares ou interdisciplinares.",
+    )
+
+    st.markdown("##### 🏆 Top 20 Artigos Mais Singulares / Inovadores")
+    top_novel = merged.sort_values("novelty_score", ascending=False).head(20).copy()
+    top_novel["novelty_score"] = top_novel["novelty_score"].round(3)
+    if "relevance_score" in top_novel.columns:
+        top_novel["relevance_score"] = top_novel["relevance_score"].round(3)
+    cols = ["novelty_score", "relevance_score", "theme_label", "title", "year", "venue", "doi"]
+    display_cols = [c for c in cols if c in top_novel.columns]
+    article_table(top_novel, display_cols, download_key="top_novidade_semantica")
 
 
 def _themes(scored: pd.DataFrame) -> None:
@@ -355,40 +642,268 @@ def _themes(scored: pd.DataFrame) -> None:
     )
 
     st.divider()
-    st.subheader("Evolução dos temas ao longo do tempo")
+    st.subheader("Evolução temporal dos temas de pesquisa")
     if "year" not in scored.columns:
         st.info("Coluna 'year' não disponível nesta camada.")
         return
-    yearly = scored.dropna(subset=["year"]).copy()
+    yearly = scored.dropna(subset=["year", "theme_label"]).copy()
     yearly["year"] = pd.to_numeric(yearly["year"], errors="coerce")
     yearly = yearly.dropna(subset=["year"]).astype({"year": int})
-    by_year = yearly.groupby(["year", "theme_label"]).size().reset_index(name="artigos")
-    if by_year.empty:
+    if yearly.empty:
         st.info("Sem anos válidos para esta análise.")
         return
 
+    min_corpus_year = int(yearly["year"].min())
+    max_corpus_year = int(yearly["year"].max())
+
+    # Controles interativos em barra compacta
+    c_time, c_metric, c_smooth = st.columns([3, 3, 3])
+    with c_time:
+        time_options = []
+        if min_corpus_year < 2000:
+            time_options.append("Desde 2000 (Recomendado)")
+        if min_corpus_year < 1990:
+            time_options.append("Desde 1990")
+        time_options.append(f"Histórico Completo ({min_corpus_year}–{max_corpus_year})")
+
+        time_choice = (
+            st.segmented_control(
+                "Horizonte temporal",
+                options=time_options,
+                default=time_options[0],
+                key="theme_evol_horizon",
+                help="Filtra o período de análise. O período moderno evita oscilações artificiais de anos esparsos antigos.",
+            )
+            or time_options[0]
+        )
+
+    with c_metric:
+        metric_choice = (
+            st.segmented_control(
+                "Métrica",
+                options=["Participação Relativa (%)", "Volume Absoluto (Artigos)"],
+                default="Participação Relativa (%)",
+                key="theme_evol_metric",
+                help="Alterne entre a participação relativa de cada tema no ano e o volume real de publicações.",
+            )
+            or "Participação Relativa (%)"
+        )
+
+    with c_smooth:
+        smooth_choice = (
+            st.segmented_control(
+                "Suavização",
+                options=[
+                    "Média móvel 3 anos (Suave)",
+                    "Média móvel 5 anos",
+                    "Sem suavização (Bruto)",
+                ],
+                default="Média móvel 3 anos (Suave)",
+                key="theme_evol_smooth",
+                help="Aplica média móvel centralizada para suavizar o ruído anual e revelar tendências estruturais.",
+            )
+            or "Média móvel 3 anos (Suave)"
+        )
+
+    # Determina o ano inicial conforme o filtro
+    if "Desde 2000" in time_choice:
+        start_year = max(2000, min_corpus_year)
+    elif "Desde 1990" in time_choice:
+        start_year = max(1990, min_corpus_year)
+    else:
+        start_year = min_corpus_year
+
+    end_year = max_corpus_year
+    filtered_yearly = yearly[(yearly["year"] >= start_year) & (yearly["year"] <= end_year)]
+
+    # 1. Constrói o grid contínuo cartesiano Produto(Anos, Temas) = 0
+    all_years = list(range(start_year, end_year + 1))
+    all_themes = sorted(filtered_yearly["theme_label"].unique())
+    if not all_years or not all_themes:
+        st.info("Nenhum dado no período selecionado.")
+        return
+
+    grid = (
+        pd.MultiIndex.from_product([all_years, all_themes], names=["year", "theme_label"])
+        .to_frame()
+        .reset_index(drop=True)
+    )
+
+    raw_counts = filtered_yearly.groupby(["year", "theme_label"]).size().reset_index(name="artigos")
+    complete = pd.merge(grid, raw_counts, on=["year", "theme_label"], how="left").fillna(
+        {"artigos": 0}
+    )
+    pivot = complete.pivot(index="year", columns="theme_label", values="artigos")
+
+    # 2. Configura a janela de suavização
+    if "3 anos" in smooth_choice:
+        win = 3
+    elif "5 anos" in smooth_choice:
+        win = 5
+    else:
+        win = 1
+
+    # 3. Calcula os valores conforme a métrica
+    is_relative = "Relativa" in metric_choice
+    if is_relative:
+        row_sums = pivot.sum(axis=1).replace(0, 1)
+        pct = pivot.div(row_sums, axis=0) * 100
+        if win > 1:
+            smoothed = pct.rolling(window=win, min_periods=1, center=True).mean()
+            smoothed_sums = smoothed.sum(axis=1).replace(0, 1)
+            smoothed = smoothed.div(smoothed_sums, axis=0) * 100
+        else:
+            smoothed = pct
+        y_col = "percentual"
+        y_title = "Participação no ano (%)"
+        plot_df = smoothed.reset_index().melt(id_vars="year", value_name=y_col)
+    else:
+        if win > 1:
+            smoothed = pivot.rolling(window=win, min_periods=1, center=True).mean()
+        else:
+            smoothed = pivot
+        y_col = "volume"
+        y_title = "Quantidade de artigos publicados"
+        plot_df = smoothed.reset_index().melt(id_vars="year", value_name=y_col)
+
+    # Associa contagem real não-suavizada para o tooltip
+    raw_vol_map = complete.rename(columns={"artigos": "volume_real"})
+    plot_df = pd.merge(plot_df, raw_vol_map, on=["year", "theme_label"], how="left")
+
+    yearly_totals = filtered_yearly.groupby("year").size()
+    plot_df["pct_real"] = plot_df.apply(
+        lambda r: r["volume_real"] / yearly_totals.get(r["year"], 1) * 100,
+        axis=1,
+    )
+
     fig = px.area(
-        by_year.sort_values("year"),
+        plot_df.sort_values(["theme_label", "year"]),
         x="year",
-        y="artigos",
+        y=y_col,
         color="theme_label",
-        groupnorm="percent",
-        title="Composição temática do corpus por ano (participação %)",
-        labels={"year": "Ano", "artigos": "Participação", "theme_label": "Tema"},
+        line_shape="spline",
+        custom_data=["volume_real", "pct_real"],
         color_discrete_sequence=CATEGORICAL_PALETTE,
     )
-    fig.update_layout(
-        xaxis_title="Ano de publicação",
-        yaxis_title="Participação no total do ano (%)",
-        hovermode="x unified",
-        legend_title_text="Tema",
+
+    hovertemplate = (
+        "<b>%{fullData.name}</b><br>"
+        "📅 <b>Ano:</b> %{x}<br>"
+        + (
+            "📊 <b>Participação (suavizada):</b> %{y:.1f}%<br>"
+            if is_relative
+            else "📚 <b>Volume (suavizado):</b> %{y:.1f} artigos<br>"
+        )
+        + "📚 <b>Volume real do ano:</b> %{customdata[0]:.0f} artigos (%{customdata[1]:.1f}%)"
+        "<extra></extra>"
     )
+    fig.update_traces(hovertemplate=hovertemplate)
+
+    fig.update_layout(
+        title=dict(
+            text="Evolução Temporal dos Temas de Pesquisa",
+            subtitle=dict(
+                text="Atenção científica por tema ao longo dos anos de publicação (interpolação spline suavizada)"
+            ),
+        ),
+        xaxis=dict(
+            title="Ano de publicação",
+            dtick=2 if (end_year - start_year) <= 20 else 5,
+        ),
+        yaxis=dict(
+            title=y_title,
+            range=[0, 100] if is_relative else None,
+        ),
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.01,
+            title=dict(text="<b>Tema Temático</b>"),
+            font=dict(size=11),
+            itemsizing="constant",
+            tracegroupgap=6,
+        ),
+        hovermode="x unified",
+    )
+
+    chart_caption = (
+        "Evolução temática com preenchimento contínuo e média móvel: elimina distorções de anos esparsos "
+        "e revela para onde a atenção científica migrou. As curvas fluidas facilitam visualizar a emergência "
+        "de tópicos como mobilidade elétrica e armazenamento distribuído."
+        if is_relative
+        else "Volume absoluto de artigos por tema em cada ano: revela o crescimento do corpus como um todo "
+        "e a expansão acelerada da produção científica nas últimas duas décadas."
+    )
+
     render_chart(
         fig,
-        caption="Participação relativa, não volume absoluto: mostra para onde a atenção da área "
-        "migrou. Anos iniciais têm poucos artigos, então oscilam muito — leia a tendência, não o "
-        "ponto isolado.",
+        height=580,
+        margin=dict(l=40, r=300, t=95, b=40),
+        caption=chart_caption,
     )
+
+    st.divider()
+    st.subheader("🧭 Deriva Semântica Temporal dos Temas (Thematic Drift)")
+    st.caption(
+        "Mudança do centro de massa de cada tema ao longo de três épocas históricas "
+        "(1990–2010, 2011–2018, 2019–2026). As trajetórias revelam como o foco "
+        "conceitual de cada linha de pesquisa se deslocou no plano semântico."
+    )
+    if (
+        "map_x" in scored.columns
+        and "map_y" in scored.columns
+        and "year" in scored.columns
+        and "theme_id" in scored.columns
+    ):
+        from lake_literature.transform.semantics import compute_temporal_drift
+
+        valid_drift = scored.dropna(subset=["map_x", "map_y", "year", "theme_id"]).copy()
+        valid_drift["year"] = pd.to_numeric(valid_drift["year"], errors="coerce")
+        valid_drift = valid_drift.dropna(subset=["year"])
+        windows = [(1990, 2010), (2011, 2018), (2019, 2026)]
+        drift_data = compute_temporal_drift(
+            valid_drift[["map_x", "map_y"]].to_numpy(dtype=float),
+            valid_drift["theme_id"].to_numpy(dtype=int),
+            valid_drift["year"].to_numpy(dtype=int),
+            windows,
+        )
+        drift_rows = []
+        theme_names = dict(zip(valid_drift["theme_id"], valid_drift["theme_label"], strict=False))
+        for t_id, pts in drift_data.items():
+            t_name = theme_names.get(t_id, f"Tema {t_id}")
+            for p in pts:
+                drift_rows.append(
+                    {
+                        "Tema": t_name,
+                        "Época": p["name"],
+                        "map_x": p["x"],
+                        "map_y": p["y"],
+                        "Artigos": p["count"],
+                    }
+                )
+        if drift_rows:
+            drift_df = pd.DataFrame(drift_rows)
+            fig_drift = px.line(
+                drift_df,
+                x="map_x",
+                y="map_y",
+                color="Tema",
+                text="Época",
+                markers=True,
+                title="Trajetória dos centróides temáticos no espaço bidimensional",
+                color_discrete_sequence=CATEGORICAL_PALETTE,
+            )
+            fig_drift.update_traces(textposition="top center")
+            fig_drift.update_layout(
+                xaxis=dict(title="Dimensão 1", showticklabels=False),
+                yaxis=dict(title="Dimensão 2", showticklabels=False),
+            )
+            render_chart(
+                fig_drift,
+                caption="As linhas conectam os centróides médios em cada época cronológica.",
+            )
 
 
 def _duplicates() -> None:

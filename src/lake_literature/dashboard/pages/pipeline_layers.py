@@ -18,6 +18,33 @@ from lake_literature.dashboard.theme import (
     hex_to_rgba,
 )
 
+
+def _load_pipeline_runs() -> pd.DataFrame:
+    """Load recent pipeline runs from gold.lit_pipeline_runs, if the table exists."""
+    from lake_literature.dashboard.data import table_exists
+    from lake_literature.db.engines import get_engine
+
+    if not table_exists("gold", "lit_pipeline_runs"):
+        return pd.DataFrame()
+    engine = get_engine("gold")
+    return pd.read_sql_query(
+        "SELECT stage, started_at, finished_at, duration_seconds, stats, status, error_message "
+        "FROM lit_pipeline_runs ORDER BY finished_at DESC LIMIT 50",
+        engine,
+    )
+
+
+def _load_rejected_records() -> pd.DataFrame:
+    """Load rejected records from silver.lit_rejected, if the table exists."""
+    from lake_literature.dashboard.data import table_exists
+    from lake_literature.db.engines import get_engine
+
+    if not table_exists("silver", "lit_rejected"):
+        return pd.DataFrame()
+    engine = get_engine("silver")
+    return pd.read_sql_query("SELECT * FROM lit_rejected ORDER BY rejected_at DESC", engine)
+
+
 LAYER_ORDER = ("raw", "bronze", "silver", "gold")
 
 
@@ -29,13 +56,20 @@ def render() -> None:
         "cobertura de metadados melhora ou piora.",
     )
 
-    hero_banner(
-        "Sem histórico de execuções",
-        "Não existe uma tabela de histórico de runs no pipeline — as estatísticas de cada estágio só vão "
-        "para <code>print</code> e para os logs do Airflow, e silver/gold são truncadas e reconstruídas a "
-        "cada execução. Todos os números desta página são calculados ao vivo a partir do estado atual das "
-        "quatro bases MySQL.",
-    )
+    runs_df = _load_pipeline_runs()
+    if runs_df.empty:
+        hero_banner(
+            "Sem histórico de execuções",
+            "Nenhuma execução registrada ainda. Execute o pipeline para popular o histórico — "
+            "as estatísticas são registradas automaticamente a cada execução.",
+        )
+    else:
+        last = runs_df.iloc[0]
+        hero_banner(
+            "Histórico de execuções",
+            f"Última execução: <b>{last['stage']}</b> em "
+            f"<code>{last['finished_at']}</code> — status: <b>{last['status']}</b>.",
+        )
 
     funnel_df = loaders.layer_funnel()
     row_counts = loaders.row_counts()
@@ -49,8 +83,24 @@ def render() -> None:
 
     _headline_metrics(funnel_df)
 
-    tab_funil, tab_retencao, tab_drift, tab_cobertura, tab_detalhes = st.tabs(
-        ["🔀 Funil", "📊 Retenção", "⚠️ Drift", "🗂️ Cobertura", "📋 Detalhes"]
+    (
+        tab_funil,
+        tab_retencao,
+        tab_drift,
+        tab_cobertura,
+        tab_detalhes,
+        tab_historico,
+        tab_rejeitados,
+    ) = st.tabs(
+        [
+            "🔀 Funil",
+            "📊 Retenção",
+            "⚠️ Drift",
+            "🗂️ Cobertura",
+            "📋 Detalhes",
+            "📜 Histórico",
+            "🚫 Rejeitados",
+        ]
     )
 
     with tab_funil:
@@ -68,6 +118,25 @@ def render() -> None:
     with tab_detalhes:
         st.subheader("📋 Contagem bruta por tabela (todas as camadas)")
         st.dataframe(row_counts, hide_index=True, width="stretch")
+
+    with tab_historico:
+        st.subheader("📜 Histórico de execuções do pipeline")
+        if runs_df.empty:
+            st.info("Nenhuma execução registrada. Execute o pipeline para popular o histórico.")
+        else:
+            st.dataframe(runs_df, hide_index=True, width="stretch")
+
+    with tab_rejeitados:
+        st.subheader("🚫 Registros rejeitados na camada silver")
+        rejected_df = _load_rejected_records()
+        if rejected_df.empty:
+            st.info("Nenhum registro rejeitado encontrado. Execute `--stage silver` para popular.")
+        else:
+            st.caption(
+                f"{len(rejected_df):,} registros excluídos na camada silver — mantidos aqui para "
+                "auditoria da revisão sistemática."
+            )
+            st.dataframe(rejected_df, hide_index=True, width="stretch")
 
 
 def _headline_metrics(funnel_df: pd.DataFrame) -> None:

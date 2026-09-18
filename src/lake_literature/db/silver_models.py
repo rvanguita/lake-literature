@@ -54,9 +54,31 @@ class Article(Base):
     has_pdf: Mapped[bool] = mapped_column(Boolean, default=False)
     pdf_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_non_article: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="0"
+    )
 
     bronze_ids: Mapped[list] = mapped_column(
         JSON, default=list
     )  # source bronze.articles ids merged
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
+class RejectedArticle(Base):
+    """Bronze records excluded at the silver stage, persisted for SLR audit.
+
+    An SLR has to document what it threw away and why -- previously the count
+    was returned in the stats dict and then lost.
+    """
+
+    __tablename__ = "lit_rejected"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    bronze_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. 'no_doi'
+    rejected_at: Mapped[dt.datetime] = mapped_column(DateTime, nullable=False)

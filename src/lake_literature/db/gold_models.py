@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -46,6 +46,9 @@ class Article(Base):
     pdf_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     silver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_non_article: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="0"
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
@@ -63,6 +66,7 @@ class Chunk(Base):
 
     embedding: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # filled by --stage embed
     embed_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    embedding_bin: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
@@ -122,3 +126,24 @@ class DuplicatePair(Base):
     similarity: Mapped[float] = mapped_column(Float)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+
+class PipelineRun(Base):
+    """One row per pipeline stage execution, written by `pipeline.py`.
+
+    Turns the per-stage stats dict (which each `run_*` already returns) into a
+    persistent record, so the "Camadas & Pipeline" page can answer "what changed
+    between the last two runs" instead of only showing live row counts.
+    """
+
+    __tablename__ = "lit_pipeline_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[dt.datetime] = mapped_column(DateTime, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # 'success' | 'error'
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

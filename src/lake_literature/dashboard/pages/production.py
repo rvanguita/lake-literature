@@ -35,7 +35,7 @@ def render() -> None:
     page_header(
         "📅",
         "Produção ao Longo do Tempo",
-        "Volume anual, crescimento acumulado por periódico e evolução do tamanho das equipes de autores.",
+        "Volume anual, crescimento acumulado e evolução temporal da produção científica qualificada.",
     )
 
     articles_df = loaders.require_articles()
@@ -46,25 +46,18 @@ def render() -> None:
         st.info("Coluna 'year' vazia nesta camada.")
         return
 
-    tab_volume, tab_acumulado, tab_comparativo, tab_colaboracao = st.tabs(
-        ["📅 Volume", "📈 Acumulado", "🆚 Comparativo", "👥 Colaboração"]
+    tab_volume, tab_acumulado, tab_qualis = st.tabs(
+        ["📅 Volume Anual", "📈 Crescimento Acumulado", "🎓 Estratos CAPES/Qualis"]
     )
 
     with tab_volume:
-        sub_ano, sub_qualis = st.tabs(["📅 Por Ano", "🎓 CAPES/Qualis"])
-        with sub_ano:
-            _volume_by_year(articles_df)
-        with sub_qualis:
-            _volume_by_year_qualis(articles_df)
+        _volume_by_year(articles_df)
 
     with tab_acumulado:
         _cumulative_production(articles_df)
 
-    with tab_comparativo:
-        _venue_comparison(articles_df)
-
-    with tab_colaboracao:
-        _collaboration(articles_df)
+    with tab_qualis:
+        _volume_by_year_qualis(articles_df)
 
 
 def _volume_by_year(articles_df: pd.DataFrame) -> None:

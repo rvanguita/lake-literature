@@ -160,6 +160,7 @@ def build_gold_articles(silver_session: Session, gold_session: Session) -> dict:
                 has_pdf=row.has_pdf,
                 pdf_path=row.pdf_path,
                 silver_id=row.id,
+                is_non_article=getattr(row, "is_non_article", False),
             )
         )
         n_articles += 1
@@ -199,6 +200,7 @@ def build_gold_articles(silver_session: Session, gold_session: Session) -> dict:
                         # `WHERE embedding IS NULL`, so those chunks would never
                         # be re-embedded.
                         embedding=null(),
+                        embedding_bin=None,
                         embed_model=None,
                     )
                 )

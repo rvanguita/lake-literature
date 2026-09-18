@@ -5,14 +5,19 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from lake_literature.dashboard import loaders
 from lake_literature.dashboard.analytics import (
+    conceptual_atypicality_analysis,
     cumulative_by_category,
+    detect_structural_breaks,
+    dynamic_topic_ctfidf,
     explode_keywords,
     source_counts_by,
     valid_years,
+    zipf_law_analysis,
 )
 from lake_literature.dashboard.charts import (
     source_bars,
@@ -49,7 +54,7 @@ def render() -> None:
     page_header(
         "🏷️",
         "Tópicos e Periódicos",
-        "Concentração editorial, vocabulário temático do corpus e evolução temporal dos tópicos de pesquisa.",
+        "Onde o corpus publica, sobre o que, e como os temas evoluíram ao longo do tempo.",
     )
 
     articles_df = loaders.require_articles()
@@ -69,17 +74,15 @@ def render() -> None:
     with tab_venues:
         (
             sub_ranking,
-            sub_table,
-            sub_totals,
-            sub_cumulative,
-            sub_a1_a3_combined,
+            sub_qualis,
+            sub_bradford,
+            sub_semantic_venues,
         ) = st.tabs(
             [
-                "🏆 Ranking",
-                "📋 Tabela CAPES/Qualis",
-                "📊 Publicações por Classificação",
-                "📈 Acumulado por Classificação",
-                "🎖️ A1-A3 — Acumulado",
+                "🏆 Ranking & Impacto",
+                "📋 Classificação CAPES/Qualis",
+                "🎯 Zonas de Bradford",
+                "🗺️ Perfil Semântico",
             ]
         )
         with sub_ranking:
@@ -89,24 +92,59 @@ def render() -> None:
             match_df, with_estrato, totals_by_estrato, estrato_order = _qualis_match_data(
                 articles_df
             )
-            with sub_table:
-                _qualis_table(articles_df, match_df, with_estrato[with_estrato["estrato"] == "A1"])
-            with sub_totals:
-                _qualis_totals_chart(totals_by_estrato, estrato_order)
-            with sub_cumulative:
-                _qualis_cumulative_chart(with_estrato, estrato_order)
-            with sub_a1_a3_combined:
-                _qualis_a1_a3_combined(with_estrato)
+            with sub_qualis:
+                qualis_view = (
+                    st.segmented_control(
+                        "Formato de Visualização CAPES/Qualis",
+                        options=[
+                            "Tabela Detalhada",
+                            "Totais por Estrato",
+                            "Evolução Acumulada",
+                            "Subconjunto A1-A3",
+                        ],
+                        default="Tabela Detalhada",
+                        key="qualis_view_selector",
+                    )
+                    or "Tabela Detalhada"
+                )
+                if qualis_view == "Tabela Detalhada":
+                    _qualis_table(
+                        articles_df, match_df, with_estrato[with_estrato["estrato"] == "A1"]
+                    )
+                elif qualis_view == "Totais por Estrato":
+                    _qualis_totals_chart(totals_by_estrato, estrato_order)
+                elif qualis_view == "Evolução Acumulada":
+                    _qualis_cumulative_chart(with_estrato, estrato_order)
+                else:
+                    _qualis_a1_a3_combined(with_estrato)
+
+            with sub_bradford:
+                _bradford_analysis(articles_df)
+            with sub_semantic_venues:
+                _semantic_venues_analysis(articles_df)
 
     with tab_keywords:
-        sub_top, sub_stats = st.tabs(["🏷️ Top 20 Palavras-Chave", "📊 Estatísticas do Vocabulário"])
+        sub_top, sub_vocab, sub_ctfidf, sub_atypical = st.tabs(
+            [
+                "🏷️ Top 20 Palavras-Chave",
+                "📊 Estrutura do Vocabulário (Zipf & Métricas)",
+                "🧬 Vocabulário Dinâmico (c-TF-IDF)",
+                "🧪 Atipicidade Conceitual (Uzzi et al.)",
+            ]
+        )
         with sub_top:
             _top_keywords(articles_df)
-        with sub_stats:
+        with sub_vocab:
             if all_keywords:
                 _keyword_stats(kw_lists, all_keywords)
+                st.divider()
+                _zipf_analysis(articles_df)
             else:
                 st.info("Nenhuma palavra-chave identificada nesta camada.")
+        with sub_ctfidf:
+            _dynamic_ctfidf_analysis(articles_df)
+        with sub_atypical:
+            _conceptual_atypicality_tab(articles_df)
 
     with tab_explorer:
         if all_keywords:
@@ -122,11 +160,12 @@ def render() -> None:
             if kw_year is None:
                 st.info("Dados insuficientes para analisar tendências temporais.")
             else:
-                sub_share, sub_slope, sub_first = st.tabs(
+                sub_share, sub_slope, sub_first, sub_breaks = st.tabs(
                     [
                         "📈 Participação Anual",
                         "🔀 Ascensão vs. Declínio",
                         "🌱 Vocabulário Novo vs. Fundacional",
+                        "⚡ Quebras Estruturais (Changepoints)",
                     ]
                 )
                 with sub_share:
@@ -135,6 +174,8 @@ def render() -> None:
                     _rising_falling(kw_year)
                 with sub_first:
                     _first_appearance(kw_year)
+                with sub_breaks:
+                    _structural_breaks_tab(articles_df)
 
 
 def _top_venues(articles_df: pd.DataFrame) -> None:
@@ -142,27 +183,79 @@ def _top_venues(articles_df: pd.DataFrame) -> None:
     if not require_columns(articles_df, ["venue"]) or not articles_df["venue"].notna().any():
         return
 
-    top_venues = articles_df["venue"].dropna().value_counts().head(15)
-    modal_source = None
-    if "source" in articles_df.columns:
-        modal_source = (
-            articles_df.dropna(subset=["venue"])
-            .groupby("venue")["source"]
-            .agg(lambda s: s.mode().iat[0])
+    rank_mode = (
+        st.segmented_control(
+            "Critério de Destaque",
+            options=["Volume de Artigos", "Impacto Médio de Citações"],
+            default="Volume de Artigos",
+            key="topics_venue_rank_mode",
         )
+        or "Volume de Artigos"
+    )
 
-    fig = topn_hbar(
-        top_venues,
-        color_by=modal_source,
-        x_title="Quantidade de artigos",
-        y_title="Periódico / Evento",
-    )
-    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos publicados<extra></extra>")
-    render_chart(
-        fig,
-        caption="Concentração editorial do corpus — cada periódico é colorido pela base predominante dos "
-        "artigos publicados nele.",
-    )
+    if rank_mode == "Volume de Artigos":
+        top_venues = articles_df["venue"].dropna().value_counts().head(15)
+        modal_source = None
+        if "source" in articles_df.columns:
+            modal_source = (
+                articles_df.dropna(subset=["venue"])
+                .groupby("venue")["source"]
+                .agg(lambda s: s.mode().iat[0])
+            )
+
+        fig = topn_hbar(
+            top_venues,
+            color_by=modal_source,
+            x_title="Quantidade de artigos",
+            y_title="Periódico / Evento",
+        )
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>%{x:,} artigos publicados<extra></extra>")
+        render_chart(
+            fig,
+            caption="Concentração editorial do corpus — cada periódico é colorido pela base predominante dos "
+            "artigos publicados nele.",
+        )
+    else:
+        if not require_columns(articles_df, ["citation_count"]):
+            return
+        cited_venues = articles_df.dropna(subset=["citation_count", "venue"])
+        venue_impact = (
+            cited_venues.groupby("venue")["citation_count"]
+            .agg(articles="size", mean="mean")
+            .query("articles >= 3")
+            .sort_values("mean", ascending=False)
+            .head(15)
+        )
+        if venue_impact.empty:
+            st.info(
+                "Nenhum periódico com artigos suficientes com contagem de citações nesta camada."
+            )
+            return
+
+        modal_source = (
+            cited_venues[cited_venues["venue"].isin(venue_impact.index)]
+            .groupby(["venue", "source"], observed=True)
+            .size()
+            .sort_values(ascending=False)
+            .reset_index()
+            .drop_duplicates("venue")
+            .set_index("venue")["source"]
+            if "source" in cited_venues.columns
+            else None
+        )
+        fig = topn_hbar(
+            venue_impact["mean"],
+            color_by=modal_source,
+            x_title="Média de citações por artigo",
+            y_title="Periódico / Evento",
+        )
+        for trace in fig.data:
+            trace.customdata = venue_impact["articles"].reindex(trace.y).to_numpy().reshape(-1, 1)
+            trace.hovertemplate = "<b>%{y}</b><br>%{x:.1f} citações/artigo (%{customdata[0]:,} artigos analisados)<extra></extra>"
+        render_chart(
+            fig,
+            caption="Média de citações por artigo para veículos com pelo menos 3 publicações no corpus.",
+        )
 
 
 def _top_keywords(articles_df: pd.DataFrame) -> None:
@@ -221,6 +314,102 @@ def _keyword_stats(kw_lists: pd.Series, all_keywords: list[str]) -> None:
             ("🚫 Artigos sem palavras-chave", f"{(kw_counts == 0).mean():.0%}", None),
         ]
     )
+
+
+def _zipf_analysis(articles_df: pd.DataFrame) -> None:
+    st.subheader("📖 Lei de Zipf do Vocabulário Técnico")
+    st.caption(
+        "A Lei de Zipf estabelece que a frequência de uma palavra é inversamente proporcional ao seu posto "
+        "($f \\propto 1/r^\\gamma$). Em acervos bibliométricos consolidados, o coeficiente de inclinação "
+        "aproxima-se de $\\gamma \\approx 1.0$, indicando um vocabulário linguístico equilibrado entre termos centrais "
+        "e cauda longa de especialização."
+    )
+
+    zipf_res = zipf_law_analysis(articles_df)
+    if not zipf_res["valid"]:
+        st.info("Texto insuficiente para avaliar a Lei de Zipf.")
+        return
+
+    metric_row(
+        [
+            ("📐 Coeficiente de Inclinação (γ)", f"{zipf_res['gamma']:.2f}", "Alvo teórico: ~1.0"),
+            (
+                "🎯 Coef. Determinação (R²)",
+                f"{zipf_res['r_squared']:.3f}",
+                "Qualidade do ajuste log-log",
+            ),
+            ("📚 Vocabulário Único", f"{zipf_res['vocab_size']:,} termos", None),
+            ("📝 Total de Ocorrências", f"{zipf_res['total_tokens']:,} palavras", None),
+        ]
+    )
+
+    plot_df = pd.DataFrame(
+        {
+            "posto": zipf_res["ranks"],
+            "frequencia": zipf_res["frequencies"],
+            "ajuste": zipf_res["expected_zipf"],
+            "termo": zipf_res["words"],
+        }
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df["posto"],
+            y=plot_df["frequencia"],
+            mode="markers",
+            name="Frequência Real",
+            text=plot_df["termo"],
+            marker=dict(size=6, color="#2a78d6", opacity=0.7),
+            hovertemplate="<b>%{text}</b><br>Posto: %{x}<br>Frequência: %{y:,}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=plot_df["posto"],
+            y=plot_df["ajuste"],
+            mode="lines",
+            name=f"Regressão Zipf (γ = {zipf_res['gamma']:.2f})",
+            line=dict(color="#eb6834", width=2.5, dash="dash"),
+            hoverinfo="skip",
+        )
+    )
+    fig.update_layout(
+        xaxis=dict(type="log", title="Posto do Termo (log r)"),
+        yaxis=dict(type="log", title="Frequência de Ocorrência (log f)"),
+        title="Distribuição Posto-Frequência do Vocabulário (Escala Log-Log)",
+        height=480,
+    )
+    render_chart(
+        fig,
+        caption="A proximidade dos pontos em relação à reta tracejada confirma a aderência do corpus à Lei de Zipf.",
+    )
+
+    st.markdown("##### 📋 Comparativo dos Top 30 Termos")
+    st.dataframe(zipf_res["top_words_df"], hide_index=True, width="stretch")
+
+
+def _dynamic_ctfidf_analysis(articles_df: pd.DataFrame) -> None:
+    st.subheader("🧬 Vocabulário Dinâmico por Tema e Época (c-TF-IDF)")
+    st.caption(
+        "O algoritmo c-TF-IDF (Class-based TF-IDF) extrai os termos que mais diferenciam cada tema temático "
+        "dos demais em cada uma das três épocas cronológicas. Revela a evolução dos tópicos tecnológicos "
+        "na literatura de planejamento de distribuição."
+    )
+
+    signals = loaders.semantics()
+    if signals.empty or "theme_label" not in signals.columns:
+        st.info("A camada semântica com atribuição de temas é necessária para esta análise.")
+        return
+
+    merged = pd.merge(articles_df, signals[["doi", "theme_label"]], on="doi", how="inner")
+    ctfidf_res = dynamic_topic_ctfidf(merged)
+
+    if not ctfidf_res["valid"]:
+        st.info("Dados temporais e temáticos insuficientes para segmentar o c-TF-IDF dinâmico.")
+        return
+
+    st.dataframe(ctfidf_res["summary_df"], hide_index=True, width="stretch")
 
 
 def _keyword_explorer(
@@ -341,6 +530,31 @@ def _rising_falling(kw_year: pd.DataFrame) -> None:
         caption=f"Inclinação da participação percentual anual de cada termo (mínimo {MIN_KEYWORD_OCCURRENCES} "
         "ocorrências no período), estimada por regressão linear simples.",
     )
+
+    from lake_literature.dashboard.analytics import mann_kendall_trend
+
+    pivoted = kw_year.groupby(["year", "keyword"]).size().unstack(fill_value=0)
+    mk_records = []
+    for kw in df["keyword"]:
+        if kw in pivoted.columns:
+            series = pivoted[kw].to_numpy()
+            res = mann_kendall_trend(series)
+            mk_records.append(
+                {
+                    "Palavra-chave": kw,
+                    "Tendência (Mann-Kendall)": res["trend"].title(),
+                    "P-valor": round(res["p_value"], 4),
+                    "Significativo (p < 0.05)": "✅ Sim" if res["p_value"] < 0.05 else "Não",
+                    "Inclinação de Sen": round(res["slope"], 3),
+                }
+            )
+    if mk_records:
+        st.markdown("##### 🔬 Teste Não-Paramétrico de Tendência (Mann-Kendall & Sen)")
+        st.caption(
+            "O teste de Mann-Kendall verifica se a evolução temporal monótona é estatisticamente "
+            "significativa (p < 0,05) e livre de suposições de normalidade residual."
+        )
+        st.dataframe(pd.DataFrame(mk_records), hide_index=True, width="stretch")
 
 
 def _first_appearance(kw_year: pd.DataFrame) -> None:
@@ -632,3 +846,269 @@ def _qualis_a1_a3_combined(with_estrato: pd.DataFrame) -> None:
                 fig,
                 caption="Distribuição de artigos A1/A2/A3 por base (IEEE vs. Elsevier).",
             )
+
+
+def _bradford_analysis(articles_df: pd.DataFrame) -> None:
+    st.subheader("🎯 Zonas de Dispersão de Bradford")
+    st.caption(
+        "A Lei de Bradford divide os periódicos em 3 zonas concêntricas de produtividade igual (~1/3 dos artigos cada). "
+        "A proporção teórica do número de periódicos em cada zona segue aproximadamente 1 : k : k²."
+    )
+    from lake_literature.dashboard.analytics import bradford_zones
+
+    res = bradford_zones(articles_df)
+    zone_sum = res.get("zone_summary")
+    if zone_sum is None or zone_sum.empty:
+        st.info("Dados insuficientes para análise de Bradford.")
+        return
+
+    metric_row(
+        [
+            (
+                "🎯 Periódicos no Núcleo (Zona 1)",
+                f"{int(zone_sum.iloc[0]['venues'])}",
+                f"{int(zone_sum.iloc[0]['articles']):,} artigos",
+            ),
+            (
+                "📚 Periódicos na Zona 2",
+                f"{int(zone_sum.iloc[1]['venues'])}",
+                f"{int(zone_sum.iloc[1]['articles']):,} artigos",
+            ),
+            (
+                "🌐 Periódicos na Zona 3",
+                f"{int(zone_sum.iloc[2]['venues'])}",
+                f"{int(zone_sum.iloc[2]['articles']):,} artigos",
+            ),
+            (
+                "📐 Multiplicador de Bradford (k)",
+                f"{res.get('multiplier_mean', 1.0):.2f}",
+                "Taxa geométrica de dispersão",
+            ),
+        ]
+    )
+
+    fig = px.bar(
+        zone_sum,
+        x="zone",
+        y="venues",
+        text="venues",
+        title="Quantidade de periódicos necessários para produzir 1/3 do corpus em cada zona",
+        labels={
+            "zone": "Zona de Bradford (1 = Núcleo, 3 = Periferia)",
+            "venues": "Quantidade de periódicos",
+        },
+        color="zone",
+        color_discrete_sequence=CATEGORICAL_PALETTE,
+    )
+    fig.update_layout(showlegend=False)
+    render_chart(
+        fig,
+        caption="A Zona 1 (núcleo) concentra os periódicos de referência obrigatória para planejamento de "
+        "sistemas de distribuição de energia. As zonas 2 e 3 revelam a dispersão ampla em veículos generalistas.",
+    )
+
+
+def _semantic_venues_analysis(articles_df: pd.DataFrame) -> None:
+    st.subheader("🗺️ Perfil Semântico dos Principais Periódicos")
+    st.caption(
+        "Posicionamento dos periódicos no espaço vetorial a partir do centróide dos artigos "
+        "que publicam. Permite visualizar a sobreposição temática de veículos independentemente "
+        "de sua editora comercial (IEEE vs. Elsevier)."
+    )
+    signals = loaders.semantics()
+    if signals.empty or "map_x" not in signals.columns or "map_y" not in signals.columns:
+        st.info("Sinais semânticos não disponíveis. Execute `--stage semantic`.")
+        return
+
+    scoped = loaders.with_semantics(articles_df)
+    valid = scoped.dropna(subset=["map_x", "map_y", "venue"]).copy()
+    if len(valid) < 10:
+        st.info("Artigos insuficientes com dados semânticos e periódicos associados.")
+        return
+
+    venue_counts = valid["venue"].value_counts()
+    eligible_venues = venue_counts[venue_counts >= 3].index
+
+    venue_stats = (
+        valid[valid["venue"].isin(eligible_venues)]
+        .groupby("venue")
+        .agg(
+            map_x=("map_x", "mean"),
+            map_y=("map_y", "mean"),
+            articles=("venue", "count"),
+            margin=("relevance_margin", "mean"),
+            source=("source", lambda s: s.mode().iat[0] if len(s) else "ieee"),
+        )
+        .reset_index()
+    )
+
+    if venue_stats.empty:
+        st.info("Nenhum periódico com volume suficiente para cálculo de centróide estável.")
+        return
+
+    fig = px.scatter(
+        venue_stats,
+        x="map_x",
+        y="map_y",
+        size="articles",
+        color="source",
+        hover_name="venue",
+        hover_data={
+            "articles": True,
+            "margin": ":.3f",
+            "map_x": False,
+            "map_y": False,
+        },
+        title="Centróides Semânticos dos Periódicos (mínimo 3 artigos no corpus)",
+        labels={
+            "source": "Base Predominante",
+            "articles": "Artigos",
+            "margin": "Margem Média",
+        },
+        color_discrete_sequence=CATEGORICAL_PALETTE,
+    )
+    fig.update_layout(
+        xaxis=dict(title="Dimensão 1 (t-SNE)", showticklabels=False),
+        yaxis=dict(title="Dimensão 2 (t-SNE)", showticklabels=False),
+    )
+    render_chart(
+        fig,
+        caption="Periódicos próximos entre si publicam artigos com vocabulário e temáticas altamente convergentes.",
+    )
+
+
+def _conceptual_atypicality_tab(articles_df: pd.DataFrame) -> None:
+    st.subheader("🧪 Análise de Atipicidade Conceitual (Uzzi et al., Science 2013)")
+    st.caption(
+        "A teoria de Brian Uzzi et al. demonstra que a ciência de mais alto impacto não decorre de ideias "
+        "totalmente exóticas nem puramente convencionais, mas da combinação de um alicerce altamente convencional "
+        "(mediana de Z > 0) com inserções de novidade conceitual atípica (Z mínimo < -0.5). Abaixo avalia-se se "
+        "papers com essa assinatura atípica apresentam taxa desproporcional de artigos hiper-citados (top 5%)."
+    )
+    res = conceptual_atypicality_analysis(articles_df)
+    if not res.get("valid"):
+        st.info("Palavras-chave insuficientes para modelagem nula de coocorrência.")
+        return
+
+    metric_row(
+        [
+            (
+                "🚀 Taxa de Sucesso (Alta Atipicidade)",
+                f"{res['hit_rate_high_atypical']:.1f}%",
+                f"Baseline: {res['hit_rate_baseline']:.1f}%",
+            ),
+            (
+                "⭐ Limiar Top 5% Citações",
+                f"≥ {res['cite_p95_threshold']} citações",
+                "Artigos no percentil 95",
+            ),
+            (
+                "🧬 Assinatura Uzzi et al.",
+                "Equilíbrio Conceitual",
+                "Convencional + Atípico",
+            ),
+            (
+                "📊 Pares Raros Mapeados",
+                f"{len(res['atypical_pairs'])} combinações",
+                "Z-score < 0 vs modelo nulo",
+            ),
+        ]
+    )
+
+    art_df = res["articles_df"]
+    fig = px.scatter(
+        art_df,
+        x="median_z",
+        y="min_z",
+        color="is_hit",
+        hover_data=["title", "citations", "year"],
+        color_discrete_map={True: "#e34948", False: "#2a78d6"},
+        labels={
+            "median_z": "Convencionalidade (Mediana de Z)",
+            "min_z": "Atipicidade (Z Mínimo)",
+            "is_hit": "Top 5% Citações?",
+        },
+        title="Dispersão: Convencionalidade vs. Atipicidade Extrema por Artigo",
+    )
+    fig.update_layout(
+        xaxis_title="Convencionalidade (Mediana Z)", yaxis_title="Atipicidade (Z Mínimo)"
+    )
+    render_chart(
+        fig,
+        caption="Artigos no quadrante inferior direito (alta convencionalidade e Z mínimo negativo) "
+        "incorporam combinações inovadoras sobre terreno teórico maduro.",
+    )
+
+    st.markdown("##### 🔍 Principais Pares Conceituais Atípicos Identificados no Corpus")
+    st.dataframe(res["atypical_pairs"], hide_index=True, width="stretch")
+
+
+def _structural_breaks_tab(articles_df: pd.DataFrame) -> None:
+    st.subheader("⚡ Detecção de Quebras Estruturais e Pontos de Inflexão (Changepoints)")
+    st.caption(
+        "Aplica o teste de Chow e minimização da soma dos quadrados dos resíduos para detectar o momento histórico "
+        "em que a taxa média de publicação sofreu uma transição de regime estatisticamente significante (p < 0.05)."
+    )
+    if "year" not in articles_df.columns:
+        st.info("Ano de publicação indisponível.")
+        return
+
+    counts = articles_df["year"].dropna().value_counts().sort_index()
+    valid_counts = counts[(counts.index >= 2000) & (counts.index <= 2025)]
+    if len(valid_counts) < 6:
+        st.info("Série temporal insuficiente para detecção de quebras.")
+        return
+
+    res = detect_structural_breaks(valid_counts)
+    if not res.get("has_break"):
+        st.info("Nenhuma quebra estrutural abrupta identificada na série analisada.")
+        return
+
+    metric_row(
+        [
+            ("📅 Ano de Quebra / Inflexão", f"{res['break_year']}", "Transição de regime"),
+            (
+                "📈 Salto Relativo de Produção",
+                f"+{res['relative_jump_pct']:.1f}%",
+                f"{res['pre_mean']} → {res['post_mean']} artigos/ano",
+            ),
+            ("🧪 Estatística F de Chow", f"{res['f_stat']:.2f}", f"p-valor: {res['p_value']:.4f}"),
+            ("⚖️ Significância", "Estatisticamente Significante", "p < 0.05"),
+        ]
+    )
+
+    break_yr = res["break_year"]
+    years = valid_counts.index.to_numpy()
+    vals = valid_counts.to_numpy()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=years, y=vals, name="Publicações / Ano", marker_color="#2a78d6"))
+    # Pre-break mean
+    fig.add_trace(
+        go.Scatter(
+            x=[years[0], break_yr],
+            y=[res["pre_mean"], res["pre_mean"]],
+            mode="lines",
+            name=f"Regime 1 ({res['pre_mean']:.1f}/ano)",
+            line=dict(color="#f39c12", width=3, dash="dash"),
+        )
+    )
+    # Post-break mean
+    fig.add_trace(
+        go.Scatter(
+            x=[break_yr, years[-1]],
+            y=[res["post_mean"], res["post_mean"]],
+            mode="lines",
+            name=f"Regime 2 ({res['post_mean']:.1f}/ano)",
+            line=dict(color="#27ae60", width=3, dash="dash"),
+        )
+    )
+    fig.update_layout(
+        title=f"Inflexão Estrutural na Série Temporal de Publicações (Ano de Quebra: {break_yr})",
+        xaxis_title="Ano",
+        yaxis_title="Artigos publicados",
+    )
+    render_chart(
+        fig,
+        caption=f"A transição de regime no ano de {break_yr} reflete a aceleração da produção científica na área.",
+    )

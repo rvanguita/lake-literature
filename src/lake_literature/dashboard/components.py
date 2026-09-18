@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import pandas as pd
 import streamlit as st
@@ -214,7 +215,7 @@ def render_global_filters(articles_df: pd.DataFrame) -> None:
 
     _render_relevance_filter()
 
-    if st.button("Limpar filtros", key="clear_global_filters", use_container_width=True):
+    if st.button("Limpar filtros", key="clear_global_filters", width="stretch"):
         st.session_state.global_year_range = (years[0], years[-1]) if years else None
         st.session_state.global_sources = []
         st.session_state.global_venues = []
@@ -287,17 +288,30 @@ def render_sidebar() -> None:
             st.caption(f"{len(filtered_df):,}/{len(articles_df):,} artigos · camada **{layer}**")
 
 
-def page_header(icon: str, title: str, description: str) -> None:
-    """Consistent page title block."""
-    st.title(f"{icon} {title}")
-    st.caption(description)
+def page_header(
+    icon_or_title: str,
+    title_or_desc: str,
+    description: str | None = None,
+) -> None:
+    """Consistent page title block. Supports (icon, title, desc) or (title, desc)."""
+    if description is None:
+        st.title(icon_or_title)
+        st.caption(title_or_desc)
+    else:
+        st.title(f"{icon_or_title} {title_or_desc}")
+        st.caption(description)
 
 
-def metric_row(metrics: list[tuple[str, str, str | None]]) -> None:
-    """A bordered row of metrics: list of (label, value, delta|None)."""
+def metric_row(metrics: Sequence[tuple[str, str] | tuple[str, str, str | None]]) -> None:
+    """A bordered row of metrics: list of (label, value) or (label, value, delta|None)."""
     with st.container(border=True):
         cols = st.columns(len(metrics))
-        for col, (label, value, delta) in zip(cols, metrics, strict=True):
+        for col, item in zip(cols, metrics, strict=True):
+            if len(item) == 2:
+                label, value = item
+                delta = None
+            else:
+                label, value, delta = item  # type: ignore[misc]
             col.metric(label, value, delta)
 
 
@@ -345,7 +359,23 @@ def require_columns(df: pd.DataFrame, cols: list[str], message: str | None = Non
 # Trace types that have no cartesian axes at all, so "this axis has no title"
 # says nothing about them.
 _AXISLESS_TRACES = frozenset(
-    {"pie", "sankey", "indicator", "treemap", "sunburst", "funnelarea", "table"}
+    {
+        "pie",
+        "sankey",
+        "indicator",
+        "treemap",
+        "sunburst",
+        "funnelarea",
+        "table",
+        "scatterpolar",
+        "scatterpolargl",
+        "barpolar",
+        "choropleth",
+        "scattergeo",
+        "scattermapbox",
+        "scattermap",
+        "scatterternary",
+    }
 )
 
 
@@ -370,13 +400,23 @@ def _warn_unnamed_axes(fig) -> None:
             continue
         if axis.title and axis.title.text:
             continue
+        if any(trace.type == "heatmap" for trace in fig.data):
+            fallback = "Dimensão X" if name == "xaxis" else "Dimensão Y"
+            fig.update_layout({f"{name}_title": fallback})
+            continue
         chart_title = (fig.layout.title.text if fig.layout.title else None) or ",".join(
             sorted({trace.type for trace in fig.data})
         )
         logger.warning("chart axis without a title: %s on %r", name, chart_title)
 
 
-def render_chart(fig, *, caption: str | None = None, height: int | None = None) -> None:
+def render_chart(
+    fig,
+    *,
+    caption: str | None = None,
+    height: int | None = None,
+    margin: dict | None = None,
+) -> None:
     """Apply the shared light/dark theme, render the figure, add its caption.
 
     Replaces the `polish_figure_layout(fig); st.plotly_chart(...); st.caption(...)`
@@ -388,7 +428,7 @@ def render_chart(fig, *, caption: str | None = None, height: int | None = None) 
     browser/system setting rather than this dashboard's sidebar "Tema" toggle
     -- so charts rendered near-black against the navy page background.
     """
-    polish_figure_layout(fig, height=height)
+    polish_figure_layout(fig, height=height, margin=margin)
     _warn_unnamed_axes(fig)
     st.plotly_chart(fig, theme=None, width="stretch")
     if caption:
