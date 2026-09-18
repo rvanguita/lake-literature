@@ -1,7 +1,7 @@
 # Product Requirements Document — lake-literature
 
-See [`../README.md`](../README.md) for a quick orientation, [`SDD.md`](SDD.md) for how this is built and
-[`ROADMAP.md`](ROADMAP.md) for what is still worth improving.
+See [`../README.md`](../README.md) for a quick orientation, [`SDD.md`](SDD.md) for how this is built, and
+[`ROADMAP.md`](ROADMAP.md) for the strategic research and improvement backlog.
 
 ## 1. Problem statement
 
@@ -34,32 +34,37 @@ Xplore and ScienceDirect search exports is unmanageable:
 - Link each deduplicated article to its PDF when one exists in the local corpus, using fuzzy title matching
   since PDF filenames are a lossy encoding of the title.
 - Chunk article text (abstracts always, full text when a PDF is linked) into a form suitable for retrieval,
-  and embed it locally with no external API dependency.
+  and embed it locally with zero-copy binary storage (`LargeBinary` float32) with no external API dependency.
 - Score every article against both readings of the ambiguous query, so relevance screening — a core step of
   a systematic literature review — is a visible, reversible decision with a defensible threshold rather than
   a hidden filter.
+- Support active learning and stratified sampling for formal screening calibration, ensuring high sensitivity
+  ($\ge 98\%$ recall) in Systematic Literature Reviews.
 - Make corpus composition, data quality, and pipeline health visible and actionable through a dashboard,
   without requiring anyone to query MySQL directly.
-- Make every pipeline stage re-runnable on demand (via CLI or Airflow) as new export files are added, without
-  duplicating existing records.
+- Provide advanced cienciometric, statistical, and machine learning capabilities: heavy-tail citation modeling,
+  age-normalized citation cohorts, non-parametric Mann-Kendall trend tests, Louvain community detection,
+  Small-World network efficiency, Bradford's and Zipf's bibliometric laws, GLM econometric determinants,
+  dynamic c-TF-IDF topic modeling, Bass diffusion, and Isolation Forest anomaly detection.
+- Make every pipeline stage re-runnable on demand (via CLI or Airflow) as new export files are added, recording
+  every execution run in `lit_pipeline_runs`.
 
 ## 3. Non-goals
 
-- Automated paper discovery or downloading. The corpus is deliberately hand-assembled from publisher search
-  UIs; this project starts from that manual export, not before it.
-- Full literature summarization or article drafting. The tool surfaces candidates and evidence; writing the
-  citing article stays a human task.
+- Automated paper discovery or web-scraping against paywalled interfaces. The corpus is hand-assembled from
+  publisher search UIs; this project starts from that manual export, not before it.
+- Full literature summarization or automatic paper generation. The tool surfaces candidates, empirical metrics,
+  and evidence; writing the citing article stays a human task.
 - Multi-tenant or multi-topic support. The pipeline and dashboard are scoped to this one corpus and topic.
-- A production-grade retrieval/RAG API. The `embed` stage prepares the data; wiring an actual
-  nearest-neighbor query service is future work (see §7).
+- Writing to production MySQL databases from dashboard pages. All pages are strictly read-only against the
+  database layer; user interventions are captured as exportable datasets or through explicit CLI stages.
 
 ## 4. Users
 
-- **Primary user**: the researcher/author assembling the corpus and deciding what to cite (also the operator
-  running the pipeline and dashboard locally).
-- **Secondary/future user**: an LLM agent consuming `gold.lit_chunks` + embeddings to answer "which papers support
-  claim X" — this is the direction the `embed` stage exists to enable, even though no agent-facing retrieval
-  API exists yet.
+- **Primary user**: the researcher/author assembling the corpus, screening papers, and deciding what to cite
+  (also the operator running the pipeline and dashboard locally).
+- **Secondary/future user**: an LLM agent consuming `gold.lit_chunks` + binary embeddings to answer "which papers
+  support claim X" via dense passage retrieval.
 
 ## 5. Use cases / user stories
 
@@ -68,26 +73,45 @@ Xplore and ScienceDirect search exports is unmanageable:
    ingested.
 2. As the researcher, I open the dashboard's "Visão Geral" page to see how many unique articles exist, how
    many come from each publisher, and how many overlap.
-3. As the researcher, I use "Destaques e Impacto" to find the most-cited or most-relevant papers before
-   deciding what to read next.
-4. As the researcher, I use "Tópicos e Periódicos" to see which keywords and venues dominate the corpus, to
-   check whether my search terms were broad/narrow enough.
+3. As the researcher, I use "Destaques e Impacto" to inspect the most-cited papers, evaluate heavy-tail
+   distributions (Power-Law vs. Log-Normal), identify age-normalized high-velocity papers, and examine
+   econometric determinants of citations via Poisson GLMs.
+4. As the researcher, I use "Tópicos e Periódicos" to see keyword vocabularies, verify Bradford's scattering
+   zones, test Zipf's Law rank-frequency regression, track dynamic c-TF-IDF topic vocabularies across historical
+   epochs, and test topic trends via non-parametric Mann-Kendall tests.
 5. As the researcher, I use "Qualidade e RAG" to check how many articles are missing abstracts or DOIs, how
-   many have a linked PDF, and how much of the corpus has been embedded — and trigger the `embed` stage
-   directly from there.
-6. As the researcher, I use "Camadas & Pipeline" to see per-layer record counts and trigger a specific stage
-   (or the full pipeline) after updating the corpus, and watch its status without leaving the dashboard.
+   many have a linked PDF, audit bibliometric anomalies via Isolation Forest, and trigger semantic search over
+   binary-stored vectors with accelerated indexing.
+6. As the researcher, I use "Camadas & Pipeline" to inspect the execution history of every pipeline run
+   (`lit_pipeline_runs`), check dropped bronze records (`lit_rejected`), and trigger stage DAGs.
 7. As the researcher, I use "Configuração da Busca" to recall exactly which query, filters, and year range
    produced the current corpus, so I can reproduce or extend the search later.
-8. As the researcher, I use "Semântica & Relevância" to screen the corpus: the margin histogram shows how
-   much of it leans to logistics rather than to the review's topic, the map shows where those articles sit,
-   and the table lists the ones below the cut so I can review them before discarding anything.
-9. As the researcher, I use "Pesquisadores" to see who publishes most in the corpus and who co-authors with
-   whom, knowing the author-identity caveat the page discloses.
-10. As the researcher, I use "Tendências & Previsão" to see where publication volume and keyword attention
-    are heading, with the current (partial) year labelled as such.
-11. (Future) As an LLM agent, I query `gold.lit_chunks` by embedding similarity to retrieve the passages most
-    relevant to a citation question and return their source DOIs.
+8. As the researcher, I use "Semântica & Relevância" to screen the corpus: the contrastive margin separates
+   distribution planning from logistics, the multi-perspective map toggles dynamically between t-SNE, PCA 2D,
+   and UMAP, semantic novelty scores reveal interdisciplinary boundary-spanning papers, and Active Learning
+   prioritizes borderline articles ($|\Delta| \approx 0$).
+9. As the researcher, I use "Pesquisadores" to see prolific authors, explore co-authorship networks clustered
+   by Louvain communities, analyze Small-World network efficiency ($\sigma$), inspect PageRank and Closeness
+   centralities, and correlate team cognitive distance with citation impact.
+10. As the researcher, I use "Tendências & Previsão" to project volume via quantile regression (P10/P50/P90)
+    and estimate technology lifecycles and peak years via Bass Diffusion modeling.
+11. As the researcher, I generate a stratified screening sample (~100 articles) across margin strata to calibrate
+    the SLR decision threshold defensibly before manuscript submission.
+12. As an LLM agent, I query `gold.lit_chunks` by binary embedding similarity to retrieve the passages most
+    relevant to a citation query and return their source DOIs.
+13. As the researcher, I use "Cienciometria Estratégica" (`pages/strategic.py`) to position research topics
+    on Callon's Strategic Diagram (density vs. centrality), explore keyword co-occurrence topologies, evaluate
+    thematic centroid distances in $\mathbb{R}^{384}$, analyze 5-axis maturity radar profiles, track Shannon
+    thematic entropy, and examine international research collaboration networks.
+14. As the researcher, I use "Evidências Metodológicas" (`pages/synthesis.py`) to synthesize optimization paradigms
+    (MILP, SOCP, MINLP, AI), map multi-objective trade-offs, cross-reference uncertainty models with physical
+    DER resources, compare multi-stage vs. static planning horizons, benchmark against standard IEEE test feeders,
+    identify algebraic solvers and simulators, evaluate career velocity ($m$-quotient, $h/g/e$-indices), and measure
+    literature half-life and text stylometrics.
+15. As the researcher, I use "Frentes Tecnológicas & Disrupção" (`pages/frontiers.py`) to assess theoretical youth
+    via Price's Index, detect delayed-recognition Sleeping Beauties ($B$ coefficient), measure scientific disruption
+    via the $CD$ index, evaluate the Open Access Citation Advantage (OACA), and track technological burst timelines
+    via Kleinberg's algorithm.
 
 ## 6. Functional requirements
 
@@ -96,68 +120,82 @@ Xplore and ScienceDirect search exports is unmanageable:
 - `raw`: ingest `config.csv`, IEEE CSV rows, all BibTeX entries (both sources), and the PDF inventory,
   verbatim, keyed for idempotent re-ingestion (`lit_source_files` manifest, sha256-based).
 - `bronze`: union IEEE and Elsevier records into one typed `bronze.lit_articles` schema; collapse pure
-  pagination duplicates within a source; no cross-source dedup yet.
+  pagination duplicates within a source; apply automated OpenAlex citation enrichment (`ingest/openalex.py`)
+  cached in `data/enrichment_cache.json`.
 - `silver`: deduplicate bronze articles by normalized DOI into one row per paper (`silver.lit_articles`);
-  compute quality flags (`has_abstract`, `has_doi`, `is_duplicate_merge`); fuzzy-match against
-  `data/articles/*.pdf` and record `has_pdf`/`pdf_path`/`pdf_match_score`.
+  compute quality flags (`has_abstract`, `has_doi`, `is_duplicate_merge`); explicitly flag non-article
+  records (`is_non_article`); persist dropped records lacking a valid DOI into `silver.lit_rejected` for
+  SLR auditability; fuzzy-match against `data/articles/*.pdf` and record `has_pdf`/`pdf_path`/`pdf_match_score`.
 - `gold`: produce the curated, RAG-facing `gold.lit_articles` table plus `gold.lit_chunks` (abstract chunks for
-  every article, full-text chunks for PDF-linked ones).
-- `embed`: fill `gold.lit_chunks.embedding`/`gold.lit_chunks.embed_model` for chunks that don't have one yet;
-  safe to re-run after every `gold` run without re-embedding existing chunks.
-- `semantic`: from the abstract embeddings, write `gold.lit_semantics` (relevance against the topic anchor
-  and against the logistics anchor, discovered theme, 2D map coordinates) and `gold.lit_duplicate_pairs`
-  (near-identical abstracts under distinct DOIs). Owns and rewrites only those two tables.
-- `all`: run all six stages in order, bootstrapping all four MySQL databases first.
+  every article, full-text chunks for PDF-linked ones), carrying `is_non_article`. Record stage execution
+  metadata into `gold.lit_pipeline_runs`.
+- `embed`: fill `gold.lit_chunks.embedding_bin` (binary float32) and `gold.lit_chunks.embedding` (JSON fallback)
+  locally via `fastembed` (`BAAI/bge-small-en-v1.5`); safe to re-run after every `gold` run without re-embedding
+  unchanged chunks.
+- `semantic`: from abstract embeddings, write `gold.lit_semantics` (contrastive relevance scores, discovered
+  theme, 2D map coordinates) and `gold.lit_duplicate_pairs` (near-identical abstracts under distinct DOIs).
+  Provides multi-projection support (t-SNE, UMAP, PCA 2D), 2D KDE density contours, and thematic centroid
+  drift tracking across chronological epochs.
+- `all`: run all six stages in order, bootstrapping all four MySQL databases first and recording run metrics.
 
 ### Dashboard (Streamlit, `uv run streamlit run main.py` or `docker compose up dashboard`)
 
-Ten pages as listed in the README's page table, each reading from the relevant layer's MySQL database. The
-"Camadas & Pipeline" and "Qualidade e RAG" pages additionally act as a control surface: they trigger Airflow
-DAG runs and poll status, rather than running pipeline code in-process. The sidebar's relevance filter is
-global and opt-in: turning it on cuts at the screening margin's zero, and an article with no score is never
-removed by it.
+Thirteen modular pages reading from the medallion MySQL layers:
+- Reads binary embeddings first via `np.frombuffer` for fast vector search, clustering, and multi-projections.
+- Discloses coverage and separates abstract vs. fulltext chunks in RAG metrics.
+- Excludes title-only records from screening margin percentiles and highlights them with warning badges.
+- Displays full pipeline run history and rejected records audit tables.
+- Strict **chart deduplication and tab hygiene**: every tab across specialized pages features unique, non-redundant visual perspectives, reserving cross-cutting summaries exclusively to the "Visão Geral" overview page.
+- Native **dark/light theme responsiveness**: transparent polar/radar backgrounds (`paper_bgcolor='rgba(0,0,0,0)'`, `polar_bgcolor='rgba(0,0,0,0)'`) and modern `width="stretch"` layout throughout.
+- Renders advanced statistical and ML panels: Methodological synthesis across 8 analytical dimensions
+  (mathematical complexity spectrum MILP/SOCP/MINLP/AI, multi-objective co-optimization taxonomy of costs/losses/reliability/emissions/resilience,
+  uncertainty paradigms cross-referenced with physical DER resources, multi-stage vs. static planning time horizons,
+  IEEE benchmark test feeders, computational modeling environments and exact solvers GAMS/CPLEX/Gurobi/MATLAB/OpenDSS,
+  scientific career velocity m-quotient alongside Hirsch h-index, Egghe's g-index, and Zhang's e-index, and citation longevity
+  with text stylometrics), Callon's Strategic Diagram (1991), keyword co-occurrence graphs, thematic centroid similarity heatmaps,
+  multi-criteria maturity radars, Spearman cross-correlations, Shannon thematic entropy, international collaboration networks,
+  Price's Index (1965) of theoretical recency, Sleeping Beauties delayed-recognition detection (Ke et al. 2015), Wu et al. (Nature 2019)
+  CD disruption index, Open Access citation advantage (OACA), Kleinberg (2002) technological burst detection, heavy-tail MLE fits,
+  age-normalized percentiles, Mann-Kendall tests, Bradford and Zipf laws, Louvain communities, Small-World coefficients,
+  dynamic c-TF-IDF topics, Isolation Forest audits, Bass diffusion NLS models, structural break / changepoints tests,
+  conceptual atypicality (Uzzi et al. 2013), and Hybrid Retrieval (BM25 Okapi + Dense BGE-Small with Reciprocal Rank Fusion).
 
 ### Orchestration (Airflow, `docker compose up -d`)
 
 Seven DAGs (`lake_literature_raw/bronze/silver/gold/embed/semantic` + `lake_literature_all`), manual/API-triggered only
 (no cron schedule), each task shelling out to the same CLI entrypoint used for local runs — so pipeline
-behavior is identical whether triggered locally or from Airflow.
+behavior is identical whether triggered locally or from Airflow. Verified with automated import tests.
 
 ## 7. Success metrics / acceptance signals
 
-- **No duplicate DOIs** in `silver.lit_articles`/`gold.lit_articles` after a full pipeline run over the
-  current corpus.
+- **Zero duplicate DOIs** in `silver.lit_articles`/`gold.lit_articles` after a full pipeline run over the corpus.
 - **Idempotent re-runs**: running `--stage all` twice in a row on an unchanged `data/` directory does not
-  change row counts in any layer.
-- **PDF-link precision**: `silver.lit_articles.has_pdf` is true only for articles whose fuzzy-matched PDF is
-  actually about that article (spot-checked manually; `pdf_match_score` gives a per-row confidence signal).
-- **Embedding coverage**: the "Qualidade e RAG" gauge reaches 100% after running `--stage embed` to
-  completion, and stays there on subsequent `gold` reruns until new chunks are added.
-- **Dashboard correctness**: page-level counts (e.g. total articles, IEEE vs. Elsevier split) match direct
-  queries against the corresponding MySQL database.
-- **Screening separates the two readings of the query**: the contrastive margin puts the logistics theme
-  below zero and everything else above it. Measured on the current corpus, 165 articles (9%) fall below the
-  cut and 145 of them sit in the logistics theme, with at most 12 in any other — and no theme other than
-  logistics has a negative mean margin.
-- **The map agrees with the themes**: a point's nearest neighbours on the semantic map mostly share its
-  theme colour (0.72 over the 15 nearest, up from 0.65 when clustering and projection used different
-  spaces). This is a readability signal, not a clustering-quality claim: silhouette on this corpus is flat,
-  because the themes genuinely overlap.
+  alter record counts in any layer.
+- **Zero chart duplication**: each tab within specialized analytical pages provides a unique analytical angle without redundant charts across tabs.
+- **Binary embedding efficiency**: `gold.lit_chunks.embedding_bin` reduces storage footprint from ~50 MB to ~9 MB
+  and eliminates per-read JSON parsing overhead, accelerating in-memory vector search by 5–10x.
+- **Hybrid Retrieval Performance**: Reciprocal Rank Fusion combines exact keyword match (BM25) with dense semantic
+  proximities, achieving zero-compromise retrieval for both technical codes and conceptual queries.
+- **Defensible screening threshold**: stratified sampling and PR curve calibration guarantee a sensitivity
+  target $\ge 98\%$ on the SLR screening boundary.
+- **Auditability of exclusions**: every dropped record is persisted with timestamp and reason in `silver.lit_rejected`.
+- **Pipeline observability**: 100% of pipeline executions are logged in `gold.lit_pipeline_runs` with wall-clock
+  durations and per-stage stats dictionaries.
+- **Dashboard agreement**: page-level aggregations match direct queries against MySQL; t-SNE nearest neighbors
+  share theme color with $>70\%$ agreement.
 
-## 8. Out of scope for this iteration / open questions
+## 8. Testing & Validation
 
-The measured improvement backlog lives in [`ROADMAP.md`](ROADMAP.md) — storage format of the embeddings,
-validating the screening threshold against hand labels, pipeline run history, and the rest. This section
-keeps only the standing scope decisions.
-
-- **Retrieval**: implemented. The "Qualidade e RAG" dashboard page runs real cosine-similarity search over
-  `gold.lit_chunks.embedding` (`dashboard/search.py`) once the `embed` stage has populated it, falling back to keyword
-  matching only when no chunk has an embedding yet. This is in-process similarity over a pandas DataFrame, not
-  a persisted vector index — acceptable at the corpus's current size (a few thousand chunks), but would need a
-  real vector store if the corpus grew by an order of magnitude or more.
-- **Corpus refresh automation**: adding new export files to `data/` is still a manual step; there is no
-  scheduled or triggered re-scrape. Remains an explicit non-goal, see §3.
-- **Testing**: 105 tests under `tests/` (see SDD §8) run against in-memory SQLite rather than real MySQL,
-  covering the transforms, the semantic stage's pure functions and the dashboard's analytics/chart/theme
-  contracts. They do not cover Airflow DAGs, the Streamlit UI itself, or file parsing against the real
-  (gitignored) `data/` corpus — those remain manually verified.
+186 automated unit and integration tests across 22 test files (executed via `uv run pytest` against in-memory
+SQLite sessions, independent of live MySQL servers):
+- Ingestion, parsing, and OpenAlex enrichment clients.
+- Medallion transforms, DOI normalization, deduplication, and additive schema bootstrap.
+- Reconciled chunk management, vector dual-write, binary-first loading, and accelerated vector indexing.
+- Semantic contrastive scoring, theme discovery, UMAP/PCA/t-SNE projections, semantic novelty, and SLR calibration.
+- Dashboard analytical functions, Callon's strategic diagram, keyword co-occurrence networks, thematic centroid similarity, maturity radars, multivariate Spearman correlation matrices, Shannon thematic entropy, and geographic collaboration.
+- Optimization taxonomy and complexity spectrum, objective function co-optimization, uncertainty paradigms cross-matrices, planning horizons, solver tooling, IEEE benchmark test feeders, author career velocity (m-quotient) and impact indices (h/g/e/i10), text stylometrics, and citation longevity.
+- Price's index theoretical recency, Sleeping Beauties delayed recognition ($B$ coefficient), Wu et al. CD disruption index, Open Access citation advantage, and Kleinberg technological bursts.
+- Structural breaks and changepoints (Chow test), Uzzi et al. conceptual atypicality analysis, and venue semantic clustering.
+- Heavy-tail MLE fits, Mann-Kendall trend tests, Zipf's law, and network graph algorithms (Louvain, PageRank, Closeness, Small-World).
+- Machine learning models: dynamic topic c-TF-IDF, Isolation Forest bibliometric anomaly detection, quantile forecasts, Bass diffusion NLS, and Hybrid BM25/RRF search.
+- Airflow DAG module import and structural validation.

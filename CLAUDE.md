@@ -9,7 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 publisher search UIs (IEEE Xplore + Elsevier/ScienceDirect), then consolidated by a medallion pipeline
 (`src/lake_literature/`) into MySQL and explored through a Streamlit dashboard (`src/lake_literature/dashboard/`).
 
-`README.md` is the project overview; `docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
+`README.md` is the project overview; `AGENTS.md` provides universal guidelines for all AI agents;
+`docs/PRD.md` (why) and `docs/SDD.md` (how) go deeper. This file is the
 canonical reference for **source-data quirks** — the other docs cross-reference it rather than repeat it.
 
 ## Commands
